@@ -4034,6 +4034,10 @@ window.__ModuleLoader__.load({
             alignItems: 'center',
             flex: '0 0 auto',
             minWidth: 0,
+            // The shipped `standardControls` row uses a 12px gap; a -6px
+            // margin here halves the visual distance to the model selector
+            // (1.0.5) without touching the shipped stylesheet.
+            marginRight: '-6px',
           },
         },
         h(
