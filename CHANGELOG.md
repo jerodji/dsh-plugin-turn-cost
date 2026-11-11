@@ -1,5 +1,10 @@
 # 更新日志
 
+## 1.0.1
+
+- 将「预算」按钮从输入框卡片上方的悬浮层移入输入框底部工具行（模型选择器左侧，`conversation.input.right`），修复与目标栏 / 附件等内容的遮挡问题。
+- 页脚对齐改用输入框内不可见锚点（`conversation.input.overlay` 的 `turn-cost-anchor`），页脚金额位置保持不变。
+
 ## 1.0.0（首个公开版本）
 
 - 首发到 GitHub（`jerodji/dsh-plugin-turn-cost`），采用 MIT 协议。

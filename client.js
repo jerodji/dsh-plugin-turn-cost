@@ -3728,7 +3728,6 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState('');
       const [settings, setSettings] = React.useState(() => readDisplaySettings());
       const [account, setAccount] = React.useState(() => balanceState.account);
-      const rootRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: null };
 
       React.useEffect(() => {
         const sync = () => forceRender((value) => value + 1);
@@ -3737,31 +3736,6 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener(BUDGET_EVENT, sync);
       }, []);
 
-      // Publish the pill row's right edge so the turn footer can align with it.
-      React.useEffect(() => {
-        const publish = () => {
-          const node = rootRef.current;
-          if (!node || typeof node.getBoundingClientRect !== 'function') return;
-          try {
-            publishComposerRight(node.getBoundingClientRect().right);
-          } catch {
-            publishComposerRight(null);
-          }
-        };
-        publish();
-        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
-          return () => publishComposerRight(null);
-        }
-        window.addEventListener('resize', publish);
-        // The sidebar / workspace panel changes the composer's x position
-        // without firing a window resize; refresh the published edge cheaply.
-        const timer = typeof setInterval === 'function' ? setInterval(publish, 1000) : undefined;
-        return () => {
-          window.removeEventListener('resize', publish);
-          if (timer !== undefined && typeof clearInterval === 'function') clearInterval(timer);
-          publishComposerRight(null);
-        };
-      }, []);
 
       React.useEffect(() => {
         const offDisplay = subscribeDisplaySettings((next) => setSettings(next));
@@ -3862,9 +3836,9 @@ window.__ModuleLoader__.load({
 
       const pillStyle = (kind) => ({
         ...MUTED,
-        height: 'calc(24px + var(--dsh-content-font-delta, 0px))',
-        padding: '4px 8px',
-        borderRadius: 4,
+        height: 'calc(26px + var(--dsh-content-font-delta, 0px))',
+        padding: '0 8px',
+        borderRadius: 8,
         border: 'none',
         background:
           hovered === kind || panel !== null
@@ -4019,20 +3993,13 @@ window.__ModuleLoader__.load({
         'div',
         {
           'data-dsh-composer-cost': 'true',
-          ref: rootRef,
-          // Rendered in `conversation.input.overlay`, whose anchor sits at the
-          // top edge of the composer card: lift the pill just above the card,
-          // near the right edge (60px clear of the circular scroll-to-bottom
-          // button) so it is always visible — in a new Session too.
+          // Rendered in `conversation.input.right`, the compact controls just
+          // before the model selector in the composer tool row.
           style: {
-            position: 'absolute',
-            right: 60,
-            top: -34,
-            zIndex: 6,
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            justifyContent: 'flex-end',
-            gap: 8,
+            flex: '0 0 auto',
+            minWidth: 0,
           },
         },
         h(
@@ -4090,6 +4057,52 @@ window.__ModuleLoader__.load({
             )
           : null,
       );
+    }
+
+
+    /**
+     * Invisible anchor kept at the old pill spot above the composer card. It
+     * publishes the card's right edge so the turn footer keeps its alignment
+     * with where the 预算 pill used to sit; the visible pill now lives in the
+     * composer tool row (`conversation.input.right`).
+     */
+    function ComposerAnchor() {
+      const nodeRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: null };
+      React.useEffect(() => {
+        const publish = () => {
+          const node = nodeRef.current;
+          if (!node || typeof node.getBoundingClientRect !== 'function') return;
+          try {
+            publishComposerRight(node.getBoundingClientRect().right);
+          } catch {
+            publishComposerRight(null);
+          }
+        };
+        publish();
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+          return () => publishComposerRight(null);
+        }
+        window.addEventListener('resize', publish);
+        const timer = typeof setInterval === 'function' ? setInterval(publish, 1000) : undefined;
+        return () => {
+          window.removeEventListener('resize', publish);
+          if (timer !== undefined && typeof clearInterval === 'function') clearInterval(timer);
+          publishComposerRight(null);
+        };
+      }, []);
+      return h('div', {
+        'data-dsh-composer-anchor': 'true',
+        'aria-hidden': 'true',
+        ref: nodeRef,
+        style: {
+          position: 'absolute',
+          right: 60,
+          top: -34,
+          width: 0,
+          height: 0,
+          pointerEvents: 'none',
+        },
+      });
     }
 
     return {
@@ -4203,14 +4216,15 @@ window.__ModuleLoader__.load({
           console.error('[turn-cost] balance reminder registration failed', error);
         }
 
-        // 「预算」/「剩余」 pills floating just above the composer card.
+        // 「预算」 pill in the composer tool row, immediately left of the model
+        // selector (session-scoped, so it appears once the Session exists).
         try {
-          ctx.slots.inject('conversation.input.overlay', () =>
+          ctx.slots.inject('conversation.input.right', () =>
             ctx.slots.register(
               {
-                name: 'conversation.input.overlay',
+                name: 'conversation.input.right',
                 id: 'turn-cost-composer',
-                order: 10,
+                order: 5,
                 locale: 'turn-cost',
               },
               ComposerCostEntry,
@@ -4218,6 +4232,19 @@ window.__ModuleLoader__.load({
           );
         } catch (error) {
           console.error('[turn-cost] composer cost registration failed', error);
+        }
+
+        // Invisible anchor at the old above-card spot: publishes the composer
+        // right edge for the turn footer alignment.
+        try {
+          ctx.slots.inject('conversation.input.overlay', () =>
+            ctx.slots.register(
+              { name: 'conversation.input.overlay', id: 'turn-cost-anchor', order: 10 },
+              ComposerAnchor,
+            ),
+          );
+        } catch (error) {
+          console.error('[turn-cost] composer anchor registration failed', error);
         }
       },
     };

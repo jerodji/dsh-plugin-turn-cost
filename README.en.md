@@ -12,7 +12,7 @@ Usage 19.2k
 
 ## Screenshots
 
-**Footer amounts and the budget pill**: each completed turn shows `(peak/off-peak) This turn $… Session $…`; the budget pill sits right above the composer and shows an orange exclamation when the session is over budget.
+**Footer amounts and the budget pill**: each completed turn shows `(peak/off-peak) This turn $… Session $…`; the budget pill sits in the composer tool row, left of the model selector, and shows an orange exclamation when the session is over budget.
 
 ![Footer amounts and the budget pill](docs/screenshots/01-turn-footer-budget.png)
 
@@ -24,7 +24,7 @@ Usage 19.2k
 
 ![Session cost detail](docs/screenshots/05-session-cost-dialog.png)
 
-**Set budget**: open the budget pill above the composer to see this session's usage and budget, adjust it, and review account balance, bonus balance and the remaining total.
+**Set budget**: open the budget pill in the composer tool row to see this session's usage and budget, adjust it, and review account balance, bonus balance and the remaining total.
 
 ![Set budget](docs/screenshots/04-budget-dialog.png)
 
@@ -52,7 +52,7 @@ In short: **it turns "how much did these tokens cost?" from invisible and hard t
 - **This turn / session cost** — the estimated cost of the turn and the cumulative session cost up to that turn. Earlier turns never change when new turns arrive.
 - **Detail popovers** — "This turn" shows token usage, billing period, per-bucket unit prices and amounts; "Session" shows cumulative tokens, stats range and the Session ID.
 - **Peak / off-peak tag** — `(peak)` / `(off-peak)` follows the turn's own end time (off-peak is 50% off). Retired models with flat pricing get no tag.
-- **Budget reminder** — a persistent "Budget $N" pill above the composer, usable in a new conversation or mid-conversation. When the session total reaches the budget you get a warning that never interrupts the conversation.
+- **Budget reminder** — a persistent "Budget $N" pill in the composer tool row (left of the model selector), usable in a new conversation or mid-conversation. When the session total reaches the budget you get a warning that never interrupts the conversation.
 - **Balance reminder** — set separate CNY and USD thresholds under Settings; you are notified once when the balance drops below the threshold, with "Remind me later" (silent for the rest of the day) and "Don't remind again" (silent until the balance recovers and dips again).
 - **Session billing statistics** — a dedicated settings page listing every session's cost, grouped by workspace directory / workspace tree / flat list, sortable by name or time, filtered by today / 7 days / 1 / 3 / 6 months / 1 year.
 - **Selection and Excel export** — select sessions or whole groups (or select all) and export the selection to an Excel workbook. Exporting with nothing selected shows "Nothing selected".
@@ -63,7 +63,7 @@ In short: **it turns "how much did these tokens cost?" from invisible and hard t
 
 1. **Install** — install the repository `https://github.com/jerodji/dsh-plugin-turn-cost` with `plugin_manager` (or clone it and install the local folder), then force-refresh the page (⌘⇧R). Requires DSH `>= 0.2.2-alpha.3`.
 2. **Read costs** — after a completed turn, the two amounts appear under the token usage line; click either to open its detail card, click the backdrop or press Esc to close.
-3. **Set a budget** — click the "Budget" pill above the composer, enter an amount and confirm. Over budget, an orange exclamation mark appears and the amount turns orange.
+3. **Set a budget** — click the "Budget" pill in the composer tool row, enter an amount and confirm. Over budget, an orange exclamation mark appears and the amount turns orange.
 4. **Set balance thresholds** — Settings → "Billing details" → "Balance reminder", fill in the CNY and USD thresholds.
 5. **Review all sessions** — Settings → "Billing details" → "Session billing statistics": choose grouping, sorting, time range and currency; tick sessions or groups and click "Export to Excel".
 6. **Control visibility** — the "Display" card on the same page can hide This turn / Session / the budget pill individually.
