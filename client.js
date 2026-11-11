@@ -300,7 +300,7 @@ window.__ModuleLoader__.load({
         range365d: '1 年内',
         rangeAll: '全部时间',
         emptyRange: '该时间范围内没有会话',
-        budgetLabel: '预算 {amount}',
+        budgetWord: '预算',
         budgetUnset: '预算',
         budgetTitle: '设置预算',
         budgetExceeded: '已超出预算',
@@ -448,7 +448,7 @@ window.__ModuleLoader__.load({
         range365d: 'Last year',
         rangeAll: 'All time',
         emptyRange: 'No sessions in this time range',
-        budgetLabel: 'Budget {amount}',
+        budgetWord: 'Budget',
         budgetUnset: 'Budget',
         budgetTitle: 'Set budget',
         budgetExceeded: 'Over budget',
@@ -543,13 +543,17 @@ window.__ModuleLoader__.load({
       return text.includes('e') ? text : text.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
     }
 
-    function money(value, currency) {
-      const symbol = symbolFor(currency);
+    /** Amount text without the currency symbol, for labels that print it once. */
+    function moneyAmount(value) {
       const amount = Number(value) || 0;
-      if (!(amount > 0)) return `${symbol}0`;
-      if (amount < 0.000001) return `<${symbol}0.000001`;
-      if (amount < 0.01) return `${symbol}${trimZeros(amount.toPrecision(2))}`;
-      return `${symbol}${trimZeros(amount.toFixed(3))}`;
+      if (!(amount > 0)) return '0';
+      if (amount < 0.000001) return '<0.000001';
+      if (amount < 0.01) return trimZeros(amount.toPrecision(2));
+      return trimZeros(amount.toFixed(3));
+    }
+
+    function money(value, currency) {
+      return `${symbolFor(currency)}${moneyAmount(value)}`;
     }
 
     /** The value a footer actually shows, so the session sum matches the rows. */
@@ -992,38 +996,6 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** A small orange exclamation mark shown in front of the budget pill label. */
-    function budgetWarningIcon() {
-      return h(
-        'svg',
-        {
-          width: 12,
-          height: 12,
-          viewBox: '0 0 16 16',
-          'aria-hidden': 'true',
-          'data-dsh-budget-warning': 'true',
-          style: { flex: 'none', display: 'inline-block' },
-        },
-        h('circle', {
-          cx: 8,
-          cy: 8,
-          r: 7,
-          fill: 'var(--dsw-alias-state-warn-primary)',
-        }),
-        h('path', {
-          d: 'M8 3.9v4.9',
-          stroke: 'var(--dsw-alias-bg-base)',
-          strokeWidth: 1.8,
-          strokeLinecap: 'round',
-        }),
-        h('circle', {
-          cx: 8,
-          cy: 12,
-          r: 1.05,
-          fill: 'var(--dsw-alias-bg-base)',
-        }),
-      );
-    }
 
     /** Rough height of a dialog body so the side with more room can be chosen. */
     function estimatePanelHeight(lines, viewportHeight) {
@@ -3729,6 +3701,13 @@ window.__ModuleLoader__.load({
       const [settings, setSettings] = React.useState(() => readDisplaySettings());
       const [account, setAccount] = React.useState(() => balanceState.account);
 
+      // The composer tool row gets cramped on narrow layouts; the pill then
+      // collapses to the currency symbol only. Measured against the nearest
+      // positioned ancestor (the composer card) so it follows real layout
+      // rather than the viewport alone.
+      const [compactLabel, setCompactLabel] = React.useState(false);
+      const rootRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: null };
+
       React.useEffect(() => {
         const sync = () => forceRender((value) => value + 1);
         if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return () => {};
@@ -3768,6 +3747,45 @@ window.__ModuleLoader__.load({
         };
       }, [panel]);
 
+      React.useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+        const measure = () => {
+          const root = rootRef.current;
+          // The slot outlet wraps entries in `display: contents` anchors, so
+          // the first ancestor with a real box is the tool row's control
+          // group: it holds this pill plus the model selector. A cramped row
+          // (model selector collapsed to an icon) is narrower than ~200px,
+          // which is where the label collapses to the symbol.
+          let width = 0;
+          let node = root && root.parentElement;
+          let guard = 0;
+          while (node && guard < 8) {
+            const rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : undefined;
+            const candidate = Number(rect && rect.width) || 0;
+            if (candidate > 0) {
+              width = candidate;
+              break;
+            }
+            node = node.parentElement;
+            guard += 1;
+          }
+          const viewport = Number(window.innerWidth) || 0;
+          if (!(width > 0)) width = viewport;
+          // Two signals: the tool row itself shrunk (model selector collapsed
+          // to its icon), or the window is narrow enough that the composer
+          // card is squeezed. Either way the pill keeps only the symbol.
+          const narrowViewport = viewport > 0 && viewport < 900;
+          setCompactLabel(narrowViewport || (width > 0 && width < 200));
+        };
+        measure();
+        if (typeof window.addEventListener === 'function') window.addEventListener('resize', measure);
+        const timer = typeof window.setInterval === 'function' ? window.setInterval(measure, 1000) : undefined;
+        return () => {
+          if (typeof window.removeEventListener === 'function') window.removeEventListener('resize', measure);
+          if (timer !== undefined && typeof window.clearInterval === 'function') window.clearInterval(timer);
+        };
+      }, []);
+
       const displayCurrency = activeCurrency();
       const budget = readBudget(sessionId);
       // The 币种 setting drives every amount on screen. A budget set while the
@@ -3792,8 +3810,15 @@ window.__ModuleLoader__.load({
       // The 显示项 toggle used to hide the balance block; since 0.5.7 it
       // controls the whole 「预算」 pill instead (default on).
       const showBudget = settings.showBudget !== false;
-      const budgetLabel =
-        budget === undefined ? t('budgetUnset') : t('budgetLabel', { amount: budgetText });
+      // Symbol first: 「¥ 预算 18」 / 「$ Budget 18」; on a cramped composer the
+      // pill keeps only the symbol. Over-budget is signalled by the orange
+      // label colour (no icon).
+      const budgetSymbol = symbolFor(displayCurrency);
+      const budgetLabel = compactLabel
+        ? budgetSymbol
+        : budget === undefined
+          ? t('budgetUnset')
+          : `${budgetSymbol} ${t('budgetWord')} ${budgetConverted ? '≈' : ''}${moneyAmount(budgetMicro / 1e6)}`;
 
       const budgetLines = [];
       if (costMicro !== undefined) budgetLines.push(`${t('budgetUsed')}：${money(costMicro / 1e6, displayCurrency)}`);
@@ -3993,6 +4018,7 @@ window.__ModuleLoader__.load({
         'div',
         {
           'data-dsh-composer-cost': 'true',
+          ref: rootRef,
           // Rendered in `conversation.input.right`, the compact controls just
           // before the model selector in the composer tool row.
           style: {
@@ -4015,8 +4041,7 @@ window.__ModuleLoader__.load({
             onMouseLeave: () => setHovered(null),
             style: pillStyle('budget'),
           },
-          exceeded ? budgetWarningIcon() : null,
-          h('span', null, budgetLabel),
+          h('span', { 'data-dsh-budget-label': 'true' }, budgetLabel),
         ),
         panel !== null
           ? h('div', {

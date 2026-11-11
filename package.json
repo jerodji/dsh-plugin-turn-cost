@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-turn-cost",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "在每轮对话底部显示本轮与会话累计费用，支持预算/余额提醒、会话计费统计与 Excel 导出；人民币/美元按官方价目表分别计价。",
   "type": "module",
   "exports": {
