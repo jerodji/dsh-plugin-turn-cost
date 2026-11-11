@@ -23,7 +23,8 @@
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "LICENSE",
-    "docs/screenshots/*.png"
+    "docs/screenshots/*.png",
+    "screenshots.json"
   ],
   "dsh": {
     "bundle": {

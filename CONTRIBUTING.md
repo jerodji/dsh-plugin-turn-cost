@@ -12,7 +12,10 @@
 | `client.js` | 浏览器半边：页脚金额、明细弹窗、预算胶囊、余额提醒、设置页「计费明细统计」 |
 | `cordis.patch.yml` | bundle 补丁，向配置插入本插件 |
 | `locale/*.json` | 插件在界面里的标题与描述（zh/en） |
-| `icon.svg` | 插件图标 |
+| `icon.svg` | 插件图标（插件管理卡片） |
+| `assets/icon-180.png` | 插件市场卡片图标（180px 位图） |
+| `screenshots.json` | 插件市场详情页截图清单（1–8 张，路径相对本文件） |
+| `docs/screenshots/*.png` | README 与插件市场使用的截图 |
 
 ## 本地调试
 
