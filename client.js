@@ -4034,10 +4034,11 @@ window.__ModuleLoader__.load({
             alignItems: 'center',
             flex: '0 0 auto',
             minWidth: 0,
-            // The shipped `standardControls` row uses a 12px gap; a -6px
-            // margin here halves the visual distance to the model selector
-            // (1.0.5) without touching the shipped stylesheet.
-            marginRight: '-6px',
+            // The shipped `standardControls` row uses a 12px gap; this
+            // negative margin offsets most of it, leaving a 2px visual
+            // distance to the model selector (1.0.6) without touching the
+            // shipped stylesheet (1.0.5 left 6px, now 2px).
+            marginRight: '-10px',
           },
         },
         h(
