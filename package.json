@@ -1,0 +1,66 @@
+{
+  "name": "dsh-plugin-turn-cost",
+  "version": "1.0.0",
+  "description": "在每轮对话底部显示本轮与会话累计费用，支持预算/余额提醒、会话计费统计与 Excel 导出；人民币/美元按官方价目表分别计价。",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "cost-model.js",
+    "billing.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "README.en.md",
+    "DETAILS.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "license": "MIT",
+  "author": "jerod",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jerodji/dsh-plugin-turn-cost.git"
+  },
+  "homepage": "https://github.com/jerodji/dsh-plugin-turn-cost#readme",
+  "bugs": {
+    "url": "https://github.com/jerodji/dsh-plugin-turn-cost/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "token",
+    "cost",
+    "billing",
+    "budget",
+    "excel"
+  ],
+  "engines": {
+    "dsh": ">=0.2.2-alpha.3"
+  },
+  "scripts": {
+    "check": "node --check client.js && node --check index.js && node --check cost-model.js && node --check billing.js"
+  }
+}
