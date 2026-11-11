@@ -3751,33 +3751,39 @@ window.__ModuleLoader__.load({
         if (typeof window === 'undefined') return undefined;
         const measure = () => {
           const root = rootRef.current;
-          // Measure the composer CARD (the nearest `position: relative`
-          // ancestor), never the tool row itself. The row's width depends on
-          // this pill's label and on the model selector collapsing to an
-          // icon, so measuring it created a feedback loop: compact pill ->
-          // row wider -> model expands -> row wider -> pill expands -> model
-          // collapses -> ... The card width is layout-stable.
+          // The composer's tool row is the app's own CSS container
+          // (`.JZLxKW_row{container-type:inline-size}`); its width equals the
+          // composer's usable width and does NOT depend on this pill's label
+          // (so it cannot feed back into the measurement) -- unlike the row's
+          // content width, which oscillated with the model selector. 560px is
+          // the app's own compact breakpoint for that row. Fall back to the
+          // nearest `position: relative` ancestor (the composer card) and
+          // finally to the viewport.
           let width = 0;
           let node = root && root.parentElement;
           let guard = 0;
-          while (node && guard < 10) {
+          while (node && guard < 12) {
             const style = typeof getComputedStyle === 'function' ? getComputedStyle(node) : undefined;
-            if (style && style.position === 'relative') {
-              const rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : undefined;
-              width = Number(rect && rect.width) || 0;
-              break;
+            if (style) {
+              const isContainer = style.containerType === 'inline-size';
+              if (isContainer || style.position === 'relative') {
+                const rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : undefined;
+                const candidate = Number(rect && rect.width) || 0;
+                if (candidate > 0) {
+                  width = candidate;
+                  break;
+                }
+              }
             }
             node = node.parentElement;
             guard += 1;
           }
           const viewport = Number(window.innerWidth) || 0;
-          // Only trust a width that looks like the card (narrow wrappers
-          // between the pill and the card must not decide). Fall back to the
-          // viewport when no card can be found.
-          const cardWidth = width >= 400 ? width : 0;
-          const narrowCard = cardWidth > 0 && cardWidth < 720;
-          const narrowViewport = !(cardWidth > 0) && viewport > 0 && viewport < 900;
-          setCompactLabel(narrowCard || narrowViewport);
+          const rowWidth = width >= 300 ? width : 0;
+          const compactByRow = rowWidth > 0 && rowWidth <= 560;
+          // No measurable row: a narrow viewport implies a narrow composer.
+          const compactByViewport = !(rowWidth > 0) && viewport > 0 && viewport < 900;
+          setCompactLabel(compactByRow || compactByViewport);
         };
         measure();
         if (typeof window.addEventListener === 'function') window.addEventListener('resize', measure);
