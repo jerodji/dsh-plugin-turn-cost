@@ -10,6 +10,32 @@
 ```
 
 
+## 截图
+
+**页脚金额与预算胶囊**：每轮结束显示「(峰/谷) 本轮 ¥… 会话 ¥…」，输入框上方常驻预算按钮（超预算时出现橙色感叹号）。
+
+![页脚金额与预算胶囊](docs/screenshots/01-turn-footer-budget.png)
+
+**本轮费用明细**：点「本轮」展开，含轮次 ID、模型、计费时段、Token 统计与逐项金额。
+
+![本轮费用明细](docs/screenshots/06-turn-cost-dialog.png)
+
+**会话费用明细**：点「会话」展开，含会话 tokens、会话合计、统计范围与会话 ID。
+
+![会话费用明细](docs/screenshots/05-session-cost-dialog.png)
+
+**设置预算**：输入框上方的预算按钮点开后，可查看本会话已用/当前预算并调整；账户余额、赠送余额与剩余合计也在这里展示。
+
+![设置预算](docs/screenshots/04-budget-dialog.png)
+
+**计费明细统计**：所有会话的账单汇总，可按币种、分组方式、排序方式、时间范围查看，勾选后导出 Excel。
+
+![计费明细统计](docs/screenshots/02-billing-overview.png)
+
+**余额提醒与显示项**：人民币/美元阈值、当前余额，以及控制页脚与预算按钮显示的三项开关。
+
+![余额提醒与显示项](docs/screenshots/03-settings-billing.png)
+
 ## 这个插件解决了什么问题
 
 - **看不懂 token 用量，算不清花了多少钱**：DSH 只在对话底部显示 token 数，而 DeepSeek 按 token 计费。装了它，每轮结束就能直接看到「这一轮多少钱、这个会话累计多少钱」，不用再拿 token 数去手算。

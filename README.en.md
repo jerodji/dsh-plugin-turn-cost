@@ -10,6 +10,32 @@ Usage 19.2k
 ```
 
 
+## Screenshots
+
+**Footer amounts and the budget pill**: each completed turn shows `(peak/off-peak) This turn $… Session $…`; the budget pill sits right above the composer and shows an orange exclamation when the session is over budget.
+
+![Footer amounts and the budget pill](docs/screenshots/01-turn-footer-budget.png)
+
+**Turn cost detail**: click “This turn” to see the turn ID, model, billing period, token buckets and the per-bucket cost.
+
+![Turn cost detail](docs/screenshots/06-turn-cost-dialog.png)
+
+**Session cost detail**: click “Session” to see session tokens, session total, the priced range and the session ID.
+
+![Session cost detail](docs/screenshots/05-session-cost-dialog.png)
+
+**Set budget**: open the budget pill above the composer to see this session's usage and budget, adjust it, and review account balance, bonus balance and the remaining total.
+
+![Set budget](docs/screenshots/04-budget-dialog.png)
+
+**Billing statistics**: all sessions in one place — switch currency, grouping, sorting and time range, then select sessions and export to Excel.
+
+![Billing statistics](docs/screenshots/02-billing-overview.png)
+
+**Balance reminder and display toggles**: CNY/USD thresholds, current balance, and the three switches that control the footer amounts and the budget pill.
+
+![Balance reminder and display toggles](docs/screenshots/03-settings-billing.png)
+
 ## What problem it solves
 
 - **Token numbers don't tell you the cost**: DSH shows tokens, DeepSeek bills per token. This plugin shows the price of each turn and the cumulative session cost right where the turn ends, so there is no mental arithmetic.
