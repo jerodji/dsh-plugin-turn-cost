@@ -3751,31 +3751,33 @@ window.__ModuleLoader__.load({
         if (typeof window === 'undefined') return undefined;
         const measure = () => {
           const root = rootRef.current;
-          // The slot outlet wraps entries in `display: contents` anchors, so
-          // the first ancestor with a real box is the tool row's control
-          // group: it holds this pill plus the model selector. A cramped row
-          // (model selector collapsed to an icon) is narrower than ~200px,
-          // which is where the label collapses to the symbol.
+          // Measure the composer CARD (the nearest `position: relative`
+          // ancestor), never the tool row itself. The row's width depends on
+          // this pill's label and on the model selector collapsing to an
+          // icon, so measuring it created a feedback loop: compact pill ->
+          // row wider -> model expands -> row wider -> pill expands -> model
+          // collapses -> ... The card width is layout-stable.
           let width = 0;
           let node = root && root.parentElement;
           let guard = 0;
-          while (node && guard < 8) {
-            const rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : undefined;
-            const candidate = Number(rect && rect.width) || 0;
-            if (candidate > 0) {
-              width = candidate;
+          while (node && guard < 10) {
+            const style = typeof getComputedStyle === 'function' ? getComputedStyle(node) : undefined;
+            if (style && style.position === 'relative') {
+              const rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : undefined;
+              width = Number(rect && rect.width) || 0;
               break;
             }
             node = node.parentElement;
             guard += 1;
           }
           const viewport = Number(window.innerWidth) || 0;
-          if (!(width > 0)) width = viewport;
-          // Two signals: the tool row itself shrunk (model selector collapsed
-          // to its icon), or the window is narrow enough that the composer
-          // card is squeezed. Either way the pill keeps only the symbol.
-          const narrowViewport = viewport > 0 && viewport < 900;
-          setCompactLabel(narrowViewport || (width > 0 && width < 200));
+          // Only trust a width that looks like the card (narrow wrappers
+          // between the pill and the card must not decide). Fall back to the
+          // viewport when no card can be found.
+          const cardWidth = width >= 400 ? width : 0;
+          const narrowCard = cardWidth > 0 && cardWidth < 720;
+          const narrowViewport = !(cardWidth > 0) && viewport > 0 && viewport < 900;
+          setCompactLabel(narrowCard || narrowViewport);
         };
         measure();
         if (typeof window.addEventListener === 'function') window.addEventListener('resize', measure);
