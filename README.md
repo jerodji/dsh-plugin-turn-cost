@@ -9,32 +9,31 @@
 (谷) 本轮 ¥0.189    会话 ¥1.048
 ```
 
-
 ## 截图
-
-**页脚金额与预算胶囊**：每轮结束显示「(峰/谷) 本轮 ¥… 会话 ¥…」，输入框工具行常驻预算按钮（模型选择器左侧，显示为「¥ 预算 20」；超预算时文字变橙；输入框变窄时只显示「¥」/「$」）。
-
-![页脚金额与预算胶囊](docs/screenshots/01-turn-footer-budget.png)
-
-**本轮费用明细**：点「本轮」展开，含轮次 ID、模型、计费时段、Token 统计与逐项金额。
-
-![本轮费用明细](docs/screenshots/06-turn-cost-dialog.png)
-
-**会话费用明细**：点「会话」展开，含会话 tokens、会话合计、统计范围与会话 ID。
-
-![会话费用明细](docs/screenshots/05-session-cost-dialog.png)
 
 **设置预算**：输入框工具行中的预算按钮点开后，可查看本会话已用/当前预算并调整；账户余额、赠送余额与剩余合计也在这里展示。
 
-![设置预算](docs/screenshots/04-budget-dialog.png)
+<img src="docs/screenshots/04-budget-dialog.png" alt="设置预算" style="zoom:50%;" />
 
-**计费明细统计**：所有会话的账单汇总，可按币种、分组方式、排序方式、时间范围查看，勾选后导出 Excel。
+**页脚金额与预算胶囊**：超出预算会进行变色提醒。
 
-![计费明细统计](docs/screenshots/02-billing-overview.png)
+<img src="docs/screenshots/01-turn-footer-budget.png" alt="页脚金额与预算胶囊" style="zoom:50%;" />
+
+**单次对话费用明细**：点「本轮」展开，含轮次 ID、模型、计费时段、Token 统计与逐项金额。
+
+<img src="docs/screenshots/06-turn-cost-dialog.png" alt="本轮费用明细" style="zoom:50%;" />
+
+**会话费用明细**：点「会话」展开，含当前会话 tokens、会话合计、统计范围与会话 ID。
+
+<img src="docs/screenshots/05-session-cost-dialog.png" alt="会话费用明细" style="zoom:50%;" />
 
 **余额提醒与显示项**：人民币/美元阈值、当前余额，以及控制页脚与预算按钮显示的三项开关。
 
-![余额提醒与显示项](docs/screenshots/03-settings-billing.png)
+<img src="docs/screenshots/03-settings-billing.png" alt="余额提醒与显示项" style="zoom:50%;" />
+
+**计费明细统计**：所有会话的账单汇总，可按币种、分组方式、排序方式、时间范围查看，勾选后导出 Excel。
+
+<img src="docs/screenshots/02-billing-overview.png" alt="计费明细统计" style="zoom:50%;" />
 
 ## 这个插件解决了什么问题
 

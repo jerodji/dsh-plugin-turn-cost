@@ -9,32 +9,31 @@ Usage 19.2k
 (off-peak) This turn $0.027    Session $0.151
 ```
 
-
 ## Screenshots
 
-**Footer amounts and the budget pill**: each completed turn shows `(peak/off-peak) This turn $… Session $…`; the budget pill sits in the composer tool row, left of the model selector, reads "$ Budget 20", turns orange when the session is over budget, and collapses to just the currency symbol when the composer is narrow.
+**Set budget**: open the budget pill in the composer tool row to see this session's usage and current budget and adjust it; account balance, bonus balance and the remaining total are shown here too.
 
-![Footer amounts and the budget pill](docs/screenshots/01-turn-footer-budget.png)
+<img src="docs/screenshots/04-budget-dialog.png" alt="Set budget" style="zoom:50%;" />
+
+**Footer amounts and the budget pill**: the label turns orange when the session is over budget.
+
+<img src="docs/screenshots/01-turn-footer-budget.png" alt="Footer amounts and the budget pill" style="zoom:50%;" />
 
 **Turn cost detail**: click “This turn” to see the turn ID, model, billing period, token buckets and the per-bucket cost.
 
-![Turn cost detail](docs/screenshots/06-turn-cost-dialog.png)
+<img src="docs/screenshots/06-turn-cost-dialog.png" alt="Turn cost detail" style="zoom:50%;" />
 
-**Session cost detail**: click “Session” to see session tokens, session total, the priced range and the session ID.
+**Session cost detail**: click “Session” to see the current session's tokens, session total, the priced range and the session ID.
 
-![Session cost detail](docs/screenshots/05-session-cost-dialog.png)
-
-**Set budget**: open the budget pill in the composer tool row to see this session's usage and budget, adjust it, and review account balance, bonus balance and the remaining total.
-
-![Set budget](docs/screenshots/04-budget-dialog.png)
-
-**Billing statistics**: all sessions in one place — switch currency, grouping, sorting and time range, then select sessions and export to Excel.
-
-![Billing statistics](docs/screenshots/02-billing-overview.png)
+<img src="docs/screenshots/05-session-cost-dialog.png" alt="Session cost detail" style="zoom:50%;" />
 
 **Balance reminder and display toggles**: CNY/USD thresholds, current balance, and the three switches that control the footer amounts and the budget pill.
 
-![Balance reminder and display toggles](docs/screenshots/03-settings-billing.png)
+<img src="docs/screenshots/03-settings-billing.png" alt="Balance reminder and display toggles" style="zoom:50%;" />
+
+**Billing statistics**: all sessions in one place — switch currency, grouping, sorting and time range, then select sessions and export to Excel.
+
+<img src="docs/screenshots/02-billing-overview.png" alt="Billing statistics" style="zoom:50%;" />
 
 ## What problem it solves
 
