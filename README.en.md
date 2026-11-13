@@ -71,7 +71,7 @@ In short: **it turns "how much did these tokens cost?" from invisible and hard t
 
 - **DeepSeek models**: estimates based on DeepSeek's official price lists; CNY and USD each use their own official table, **never an FX conversion**.
 - **Third-party models** (other providers you connect): priced from the **offline model catalog bundled with DSH** (pi-ai, USD per 1M tokens) — no network needed, available at startup. In CNY mode the amount is approximated at 1 USD ≈ ¥7.10 and marked with `≈`.
-- Models whose catalog rates are all 0 show **Free**; models absent from the catalog show **Unknown** and are excluded from the session total (the session amount becomes a `≥` lower bound).
+- Models whose catalog rates are all 0 show `¥0` (`$0` in USD mode); models absent from the catalog show `¥??` (`$??`) and are excluded from the session total, so a session with priced turns becomes a `≥` lower bound.
 - Peak hours are weekdays 09:00–12:00 and 14:00–18:00 Beijing time; everything else is off-peak at 50% off, judged by **each turn's own end time** (DeepSeek only; catalog prices are flat all day).
 - Web search / fetch is billed per successful request (¥5 or $0.75 per 1,000), only for the new Search/Fetch API and only for DeepSeek models.
 - Statutory holidays are not excluded, and turns spanning peak/off-peak are priced by their end time — both are approximations.
