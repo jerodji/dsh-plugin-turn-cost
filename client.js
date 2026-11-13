@@ -648,7 +648,19 @@ window.__ModuleLoader__.load({
       const assumed = routes.length === 0;
       const model = assumed ? FALLBACK_MODEL : String(routes[0].model || FALLBACK_MODEL);
       const mixed = new Set(routes.map((route) => `${route.provider}\u0000${route.model}`)).size > 1;
-      const info = { model, assumed, mixed, routes: routes.length, detail: estimate(usage, model, time, key) };
+      const provider = assumed ? '' : String(routes[0].provider || '');
+      // Third-party routes are not priced by the DeepSeek tables; without the
+      // projection (older Host) we would rather show nothing than a wrong rate.
+      const foreignRoute = provider !== '' && !/^deepseek/i.test(provider);
+      const info = {
+        model,
+        assumed,
+        mixed,
+        routes: routes.length,
+        provider,
+        pricing: foreignRoute ? 'unknown' : 'deepseek',
+        detail: foreignRoute ? undefined : estimate(usage, model, time, key),
+      };
       byCurrency.set(key, info);
       return info;
     }
@@ -862,12 +874,14 @@ window.__ModuleLoader__.load({
       if (info.status === 'unknown') lines.push(t('tipUnknownNote', {}));
       if (info.status === 'free') lines.push(t('tipFreeNote', {}));
       if (info.status === 'priced' && info.approx) lines.push(t('tipCatalogNote', { rate: String(APPROX_CNY_PER_USD) }));
-      lines.push(
-        t('tipNote', {
-          currency: currencyName(),
-          webPrice: `${symbolFor()}${priceText(webRequestPrice())}`,
-        }),
-      );
+      if (info.pricing === 'deepseek') {
+        lines.push(
+          t('tipNote', {
+            currency: currencyName(),
+            webPrice: `${symbolFor()}${priceText(webRequestPrice())}`,
+          }),
+        );
+      }
       return lines;
     }
 
@@ -1621,6 +1635,7 @@ window.__ModuleLoader__.load({
         mixed: false,
         routes: 1,
         status,
+        pricing: own.pricing || 'deepseek',
         approx: detail.approx,
       };
       const lines = describeTokens(detail, usage, info, t);
