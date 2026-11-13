@@ -30,7 +30,7 @@ export const PROJECTION_KEY = 'turnCost';
 
 /** Bump when the state/view shape changes; the projection cache is versioned. */
 /** Bumped when the projection state or its client-visible view changes shape. */
-export const COST_MODEL_VERSION = 3;
+export const COST_MODEL_VERSION = 4;
 
 /** Per-successful-request price of the Web Search / Fetch APIs, in micro-CNY. */
 export const SEARCH_REQUEST_MICRO = 5000;
@@ -79,6 +79,111 @@ export const USD_SEARCH_REQUEST_MICRO = 750;
 export const USD_FETCH_REQUEST_MICRO = 750;
 
 export const PRICE_VERSION_USD = 'deepseek-usd-2026-11-11';
+
+/**
+ * Approximate CNY per USD, used only to DISPLAY a USD catalog price in CNY.
+ * Catalog prices are published in USD, so the CNY figure is an approximation
+ * and every consumer marks it with a `≈`.
+ */
+export const APPROX_CNY_PER_USD = 7.1;
+
+/**
+ * Bundled pi-ai provider catalog, installed by the Host half at startup.
+ * Shape: `{ providers: { <provider>: { <model>: { input, output, cacheRead,
+ * cacheWrite } } } }` — USD per 1,000,000 tokens, exactly as published.
+ * Empty book = every non-DeepSeek model is unknown (and therefore not billed).
+ */
+let priceBook = { providers: {}, version: 'none', loadedAt: 0, models: 0 };
+
+export function setPriceBook(book) {
+  if (!book || typeof book !== 'object' || !book.providers || typeof book.providers !== 'object') {
+    priceBook = { providers: {}, version: 'none', loadedAt: 0, models: 0 };
+    return priceBook;
+  }
+  priceBook = {
+    providers: book.providers,
+    version: typeof book.version === 'string' ? book.version : 'bundled',
+    loadedAt: Number(book.loadedAt) || Date.now(),
+    models: Number(book.models) || 0,
+  };
+  return priceBook;
+}
+
+/** Small snapshot of the loaded book, for logs and the tooltip footer. */
+export function priceBookInfo() {
+  return { version: priceBook.version, loadedAt: priceBook.loadedAt, models: priceBook.models };
+}
+
+function numeric(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+/** Look up one model in the bundled catalog; provider/model match is exact. */
+export function catalogPriceFor(provider, model) {
+  const providers = priceBook.providers;
+  const providerKey = String(provider || '');
+  const modelKey = String(model || '');
+  if (providerKey === '' || modelKey === '') return undefined;
+  const models = providers[providerKey];
+  if (!models || typeof models !== 'object') return undefined;
+  const record = models[modelKey];
+  if (!record || typeof record !== 'object') return undefined;
+  const input = numeric(record.input);
+  const output = numeric(record.output);
+  const cacheRead = numeric(record.cacheRead);
+  const cacheWrite = numeric(record.cacheWrite);
+  if (input === undefined || output === undefined) return undefined;
+  return { input, output, cacheRead: cacheRead ?? 0, cacheWrite: cacheWrite ?? 0 };
+}
+
+export function isDeepSeekProvider(provider) {
+  return String(provider || '').toLowerCase().startsWith('deepseek');
+}
+
+/** Resolve one turn's price: which scheme applies and what it costs. */
+export function resolvePricing(provider, model, tokens, peak) {
+  const hasUsage = (Number(tokens && tokens.total) || 0) > 0;
+  if (!hasUsage) return { pricing: 'empty', costMicro: 0, costUsdMicro: 0, approxCny: false, rates: null };
+  const kind = isDeepSeekProvider(provider) ? classifyModel(model) : undefined;
+  if (kind !== undefined) {
+    const cny = costMicroOf(tokens, kind, peak);
+    const usd = usdCostMicroOf(tokens, kind, peak);
+    const cnyRate = PEAK_PRICES[kind];
+    const usdRate = USD_PEAK_PRICES[kind];
+    // Store the rates actually charged for this turn (off-peak halves them), so
+    // a consumer can print tokens × effective rate = amount without re-deriving.
+    const factor = kind === 'legacy' || peak ? 1 : OFF_PEAK_FACTOR;
+    return {
+      pricing: 'deepseek',
+      costMicro: cny,
+      costUsdMicro: usd,
+      approxCny: false,
+      rates: {
+        cny: { hit: cnyRate.hit * factor, miss: cnyRate.miss * factor, output: cnyRate.output * factor },
+        usd: { hit: usdRate.hit * factor, miss: usdRate.miss * factor, output: usdRate.output * factor },
+        flat: kind === 'legacy',
+      },
+    };
+  }
+  const catalog = catalogPriceFor(provider, model);
+  if (catalog === undefined) {
+    return { pricing: 'unknown', costMicro: null, costUsdMicro: null, approxCny: false, rates: null };
+  }
+  const zero = catalog.input === 0 && catalog.output === 0 && catalog.cacheRead === 0 && catalog.cacheWrite === 0;
+  if (zero) {
+    return { pricing: 'free', costMicro: 0, costUsdMicro: 0, approxCny: false, rates: { cny: null, usd: catalog, flat: true } };
+  }
+  const input = Number(tokens.uncachedInput) || 0;
+  const write = Number(tokens.cacheWrite) || 0;
+  const read = Number(tokens.cacheRead) || 0;
+  const output = Number(tokens.output) || 0;
+  const usd = Math.round(input * catalog.input + write * catalog.cacheWrite + read * catalog.cacheRead + output * catalog.output);
+  const cny = Math.round(usd * APPROX_CNY_PER_USD);
+  const cnyRates = {};
+  for (const key of ['input', 'output', 'cacheRead', 'cacheWrite']) cnyRates[key] = catalog[key] * APPROX_CNY_PER_USD;
+  return { pricing: 'catalog', costMicro: cny, costUsdMicro: usd, approxCny: true, rates: { cny: cnyRates, usd: catalog, flat: true } };
+}
 
 /** Assumed route when events carry no provider/model attribution. */
 export const FALLBACK_MODEL = 'deepseek-flash';
@@ -206,6 +311,7 @@ export function usdCostMicroOf(tokens, modelKind, peak) {
  */
 export function usdMicroOfTurn(entry) {
   if (!entry || typeof entry !== 'object') return null;
+  if (Number.isFinite(entry.costUsdMicro)) return Number(entry.costUsdMicro);
   if (entry.empty === true) return 0;
   const cny = entry.costMicro;
   if (cny === null || cny === undefined) return null;
@@ -227,6 +333,8 @@ export function createState(sessionId, inheritedEventCount = 0) {
     turns: [],
     open: null,
     sessionCostMicro: 0,
+    sessionCostUsdMicro: 0,
+    sessionFreeTurns: 0,
     sessionTokens: emptyTokens(),
     // Billed web-tool totals for this Session: successful search queries,
     // successful fetches, auxiliary Messages search requests, and the amount
@@ -275,6 +383,7 @@ function toolResultMessage(data) {
 function finalizeTurn(state, open, endedAt) {
   const tokens = emptyTokens();
   let model;
+  let provider;
   for (const key of Object.keys(open.steps)) {
     const step = open.steps[key];
     addTokens(tokens, {
@@ -285,15 +394,29 @@ function finalizeTurn(state, open, endedAt) {
       totalTokens: step.tokens.total,
     });
     model = model || step.model;
+    provider = provider || step.provider;
   }
   const turn = Number(open.turn) || 0;
   const hasUsage = tokens.total > 0;
-  const kind = hasUsage ? classifyModel(model || FALLBACK_MODEL) : undefined;
   const peak = isPeak(endedAt);
-  // Peak/off-peak tag stored alongside the amount so consumers never have to
-  // re-derive it from the model + timestamp. Retired flat-price ids get 'flat'.
-  const period = !hasUsage ? null : kind === 'legacy' ? 'flat' : peak ? 'peak' : 'offpeak';
-  const tokenCostMicro = hasUsage && kind !== undefined ? costMicroOf(tokens, kind, peak) : hasUsage ? null : 0;
+  // Provider-aware pricing: DeepSeek keeps its official peak/off-peak CNY + USD
+  // tables; every other provider is priced from the bundled pi-ai catalog (USD
+  // per 1M, no peak rule); models the catalog does not describe stay unknown and
+  // are never billed. A catalog entry whose four rates are all zero is free.
+  const price = hasUsage
+    ? resolvePricing(provider, model || FALLBACK_MODEL, tokens, peak)
+    : { pricing: 'empty', costMicro: 0, costUsdMicro: 0, approxCny: false, rates: null };
+  // Peak/off-peak (or flat) bucket stored alongside the amount so consumers never
+  // re-derive it. DeepSeek legacy ids and catalog/free turns are flat.
+  const period = !hasUsage
+    ? null
+    : price.pricing !== 'deepseek'
+      ? 'flat'
+      : classifyModel(model) === 'legacy'
+        ? 'flat'
+        : peak
+          ? 'peak'
+          : 'offpeak';
 
   // Web tools: a Messages-mode search bills as tokens inside one auxiliary
   // Messages request per query, so only the requests beyond those observed
@@ -307,24 +430,34 @@ function finalizeTurn(state, open, endedAt) {
   if (searchRequests > 0) webMode = messagesRequests > 0 ? 'messages' : 'api';
   const billedFetchRequests = webMode === 'api' ? fetchRequests : 0;
   // A turn with no settled usage (aborted before its assistant message) stays
-  // "empty": it shows no footer row, so its web fee is counted in the record
-  // but not charged — that keeps the footer's session sum and this total equal.
-  const chargeable = hasUsage && tokenCostMicro !== null;
+  // "empty": it shows no footer row, so its web fee is counted in the record but
+  // not charged — that keeps the footer's session sum and this total equal.
+  const chargeable = hasUsage && price.pricing !== 'unknown';
   const searchFeeMicro = chargeable ? billedSearchRequests * SEARCH_REQUEST_MICRO : 0;
   const fetchFeeMicro = chargeable ? billedFetchRequests * FETCH_REQUEST_MICRO : 0;
   const webFeeMicro = searchFeeMicro + fetchFeeMicro;
-  const costMicro = tokenCostMicro === null ? null : tokenCostMicro + webFeeMicro;
+  const costMicro = price.costMicro === null ? null : price.costMicro + webFeeMicro;
+  const costUsdMicro = price.costUsdMicro === null
+    ? null
+    : price.costUsdMicro + billedSearchRequests * USD_SEARCH_REQUEST_MICRO + billedFetchRequests * USD_FETCH_REQUEST_MICRO;
   const sessionCostMicro = state.sessionCostMicro + (costMicro || 0);
+  const sessionCostUsdMicro = state.sessionCostUsdMicro + (costUsdMicro || 0);
   const entry = {
     id: `${state.sessionId}:${turn}`,
     turn,
     startedAt: Number(open.startedAt) || 0,
     endedAt: Number(endedAt) || 0,
     model: hasUsage ? model || FALLBACK_MODEL : null,
+    provider: hasUsage ? provider || null : null,
+    // 'deepseek' | 'catalog' | 'free' | 'unknown' | 'empty'
+    pricing: price.pricing,
+    approxCny: price.approxCny,
+    rates: price.rates,
     peak,
     period,
     tokens,
     costMicro,
+    costUsdMicro,
     // Web-tool usage this turn: successful search queries, successful fetches,
     // auxiliary Messages search requests, and the per-call fee included in
     // `costMicro` (0 when the turn billed no per-call fee).
@@ -336,17 +469,20 @@ function finalizeTurn(state, open, endedAt) {
     webFeeMicro,
     webSearchBilled: searchFeeMicro > 0,
     webFetchBilled: fetchFeeMicro > 0,
-    // `empty` turns ended without any settled assistant usage (the user
-    // aborted them, or every attempt failed). They display no row and never
-    // turn the session amount into a lower bound.
+    // `empty` turns ended without any settled assistant usage (the user aborted
+    // them, or every attempt failed). They display no row and never turn the
+    // session amount into a lower bound.
     empty: !hasUsage,
     sessionCostMicro,
+    sessionCostUsdMicro,
   };
   const next = {
     ...state,
     turns: state.turns.concat([entry]),
     open: null,
     sessionCostMicro,
+    sessionCostUsdMicro,
+    sessionFreeTurns: state.sessionFreeTurns + (price.pricing === 'free' ? 1 : 0),
     sessionTokens: addSessionTokens(state.sessionTokens, tokens),
     sessionWeb: {
       search: state.sessionWeb.search + searchRequests,
@@ -355,7 +491,7 @@ function finalizeTurn(state, open, endedAt) {
       feeMicro: state.sessionWeb.feeMicro + webFeeMicro,
     },
     webMode,
-    missingTurns: costMicro === null ? state.missingTurns.concat([turn]) : state.missingTurns,
+    missingTurns: price.pricing === 'unknown' ? state.missingTurns.concat([turn]) : state.missingTurns,
     updatedAt: Number(endedAt) || state.updatedAt,
   };
   return next;
@@ -472,7 +608,11 @@ export function foldEvent(state, event) {
     // Per step the settled sample wins: a retried step is billed once, at the
     // last attempt that actually settled with usage.
     const steps = { ...open.steps };
-    steps[step] = { tokens: bucketOf(usage), model: route ? route.model : undefined };
+    steps[step] = {
+      tokens: bucketOf(usage),
+      model: route ? route.model : undefined,
+      provider: route ? route.provider : undefined,
+    };
     return {
       ...state,
       open: { ...open, steps },
@@ -507,9 +647,12 @@ export function viewOf(state) {
     turns: state.turns,
     session: {
       costMicro: state.sessionCostMicro,
+      costUsdMicro: state.sessionCostUsdMicro,
       turns: state.turns.length,
       pricedTurns: state.turns.length - state.missingTurns.length,
+      freeTurns: state.sessionFreeTurns,
       missingTurns: state.missingTurns,
+      priceBook: priceBookInfo(),
       tokens: state.sessionTokens,
       web: state.sessionWeb,
     },

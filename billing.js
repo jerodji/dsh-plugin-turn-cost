@@ -16,7 +16,7 @@
  * Everything here is pure aggregation over Host Services passed in by the
  * caller, so it can be exercised from a plain Node test with fakes.
  */
-import { foldAll, usdMicroOfTurn, viewOf } from './cost-model.js';
+import { foldAll, viewOf } from './cost-model.js';
 
 const SESSION_CACHE_TTL_MS = 30_000;
 const ACCOUNT_CACHE_TTL_MS = 30_000;
@@ -39,18 +39,14 @@ async function sessionSummary(sessionQuery, sessionId) {
   const inherited = toNumber(snapshot.inheritedEventCount);
   const events = Array.isArray(snapshot.events) ? snapshot.events : [];
   const view = viewOf(foldAll(events, sessionId, inherited));
-  let costUsdMicro = 0;
-  for (const turn of Array.isArray(view.turns) ? view.turns : []) {
-    const usd = usdMicroOfTurn(turn);
-    if (usd !== null) costUsdMicro += usd;
-  }
   const value = {
     sessionId,
     title: typeof view.title === 'string' && view.title.length > 0 ? view.title : '',
     costMicro: toNumber(view.session && view.session.costMicro),
-    costUsdMicro: toNumber(costUsdMicro),
+    costUsdMicro: toNumber(view.session && view.session.costUsdMicro),
     turns: toNumber(view.session && view.session.turns),
     pricedTurns: toNumber(view.session && view.session.pricedTurns),
+    freeTurns: toNumber(view.session && view.session.freeTurns),
     missingTurns: Array.isArray(view.session && view.session.missingTurns)
       ? view.session.missingTurns.slice()
       : [],
@@ -182,6 +178,7 @@ async function buildFullState(ctx) {
         costUsdMicro: summary.costUsdMicro,
         turns: summary.turns,
         pricedTurns: summary.pricedTurns,
+        freeTurns: summary.freeTurns,
         missingTurns: summary.missingTurns,
         tokens: summary.tokens,
         updatedAt: summary.updatedAt,

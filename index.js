@@ -12,7 +12,16 @@
  *
  * All pricing logic lives in `./cost-model.js` (dependency-free, unit-tested).
  */
-import { COST_MODEL_VERSION, PROJECTION_KEY, createState, foldEvent, viewOf } from './cost-model.js';
+import {
+  COST_MODEL_VERSION,
+  PROJECTION_KEY,
+  createState,
+  foldEvent,
+  priceBookInfo,
+  setPriceBook,
+  viewOf,
+} from './cost-model.js';
+import { loadPriceCatalog } from './price-catalog.js';
 import { STATE_ROUTE, handleStateRequest } from './billing.js';
 
 export const inject = ['sessionProjections'];
@@ -38,6 +47,22 @@ export const TURN_COST_PROJECTION = {
 };
 
 export async function apply(ctx) {
+  // Offline price source: the pi-ai provider catalogs bundled with the app.
+  // Loading happens once per Host process start and costs no network request;
+  // a model switch is a plain in-memory lookup afterwards. Without the catalog
+  // only DeepSeek models are priced, everything else reports as unknown.
+  const catalog = loadPriceCatalog();
+  if (catalog !== undefined) {
+    const book = setPriceBook(catalog);
+    if (typeof ctx.logger?.info === 'function') {
+      ctx.logger.info(
+        `turn-cost: price catalog "${book.version}" loaded (${book.models} models, ${Object.keys(book.providers).length} providers)`,
+      );
+    }
+  } else if (typeof ctx.logger?.warn === 'function') {
+    ctx.logger.warn(new Error('turn-cost: bundled price catalog unavailable; non-DeepSeek models will be unknown'));
+  }
+
   await ctx.sessionProjections.register(TURN_COST_PROJECTION);
   if (typeof ctx.logger?.info === 'function') {
     ctx.logger.info(`turn-cost: projection "${PROJECTION_KEY}" v${COST_MODEL_VERSION} registered`);

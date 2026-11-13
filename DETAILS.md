@@ -155,6 +155,19 @@ localStorage 记录按会话分组、轮次以 `id` 为键，便于按会话 ID 
 
 **货币跟随界面语言**：中文界面用 DeepSeek 官方**人民币**价（¥），英文界面用官方**美元**价（$）。两套价目表各自独立（见下方 0.8.0 一节），不做汇率换算；宿主投影始终以人民币微元存储，美元金额在客户端逐轮按 token 桶重算。
 
+### 第三方模型、未知与免费（1.1.0）
+
+计价按**模型提供方**区分（宿主记录每轮的 `provider`）：
+
+1. `provider` 以 `deepseek` 开头：按上面两张 DeepSeek 官方价目表（人民币 / 美元）与峰谷规则计价，金额**精确**、不加 `≈`。
+2. 其他服务商：查 DSH 内置的 **pi-ai 离线模型目录**（`@earendil-works/pi-ai/dist/providers/data/*.json`，43 个服务商、1700+ 模型，价格单位美元 / 百万 tokens）。
+   - 有价格：美元金额 = token 桶 × 目录单价；人民币模式按 `1 美元 ≈ ¥7.10` 折算并标 `≈`。
+   - 目录里输入/输出/缓存读/缓存写**全为 0**：显示 **免费**（不显示 ¥ / $）。
+   - 目录里没有该模型：显示 **未知**（不显示 ¥ / $），该轮不计入会话合计；此时会话金额显示为「≥ 已知部分」或「未知」。
+3. 不再用「模型名包含 flash/pro」这种模糊匹配来定价，因此 `glm-4.5-flash` 这类免费模型不会被误按 DeepSeek Flash 价格计费。
+
+价格目录在宿主启动时**一次性加载**（不联网、不请求官方接口），每轮的计价结果写入投影并落盘，历史轮次不会因后续价格调整而变化；升级后的投影会**重放日志**，旧轮次自动按新规则重算。
+
 按 DeepSeek 官方人民币价格（2026-11-11 查询于 api-docs.deepseek.com，单位：元 / 百万 tokens），高峰时段按下表原价、低谷时段按 **50%** 计价：
 
 | 模型路由 | 缓存命中输入 | 缓存未命中输入 | 输出（含推理） |
@@ -180,7 +193,7 @@ localStorage 记录按会话分组、轮次以 `id` 为键，便于按会话 ID 
 
 ## 实现
 
-- **宿主半边** `index.js`：`inject = ['sessionProjections']`，`apply` 注册 `turnCost` 投影（`stateVersion` 跟随 `COST_MODEL_VERSION`（现为 3），`wire.summary: false`，不进入会话列表汇总）。投影状态 `{sessionId, title, turns[], open, sessionCostMicro, sessionTokens, sessionWeb, webMode, missingTurns, inheritedEventCount}` 由 `cost-model.js` 的纯函数折叠得到，可离线单测。折叠除 `assistant/message` 的 usage 外，还消费 `tool/call` / `tool/result`（统计 `web_search` / `web_fetch` 的成功请求数）与 `web/deepseek-search-llm-request`（统计辅助 Messages 搜索数），据此推断本轮走的是新版 API 还是默认 Messages 搜索。
+- **宿主半边** `index.js`：`inject = ['sessionProjections']`，`apply` 注册 `turnCost` 投影（`stateVersion` 跟随 `COST_MODEL_VERSION`（现为 4），`wire.summary: false`，不进入会话列表汇总）。投影状态 `{sessionId, title, turns[], open, sessionCostMicro, sessionTokens, sessionWeb, webMode, missingTurns, inheritedEventCount}` 由 `cost-model.js` 的纯函数折叠得到，可离线单测。折叠除 `assistant/message` 的 usage 外，还消费 `tool/call` / `tool/result`（统计 `web_search` / `web_fetch` 的成功请求数）与 `web/deepseek-search-llm-request`（统计辅助 Messages 搜索数），据此推断本轮走的是新版 API 还是默认 Messages 搜索。
 - **浏览器半边** `client.js`：通过 `conversation.chat.turnTail` 插槽（顺序 30）渲染，不替换任何内置 UI；读取 `useProjection('turnCost')`，并镜像到 localStorage（每条轮次记录含 `peak` 与 `period` 峰谷桶，加载时直接读取）；只 `require('react')` 基线模块，文案走 Client locale 服务（内置 `zh` / `en`），样式只用 `--dsw-alias-*` 主题变量，不写 DOM、不注入全局样式。
 - 会话列表不包含本投影（`summary:false`），只有打开的会话会取全量 `turnCost` 记录。
 - 设置页数据：宿主用 `connection.fetch.register` 注册认证路由 `GET /api/turn-cost/state`（`billing.js`），返回钱包余额、全部会话的费用/标题/工作区归属与工作区汇总；浏览器用同源相对路径 `fetch`，请求头带 `x-dsh-turn-cost: 1`。数据缓存 30 秒（设置页另有 30 秒轮询与手动「刷新」）。没有 Connection 服务的部署会退回 `webServer` 静态路由（并自带 Host / 请求头校验）。
