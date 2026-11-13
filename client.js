@@ -196,10 +196,15 @@ window.__ModuleLoader__.load({
         tipPeriod: '计费时段：{period}',
         periodPeak: '高峰时段（标准价）',
         periodOffPeak: '低谷时段（5 折）',
+        periodPlan: '订阅套餐额度（无单轮价格）',
         periodFlat: '全天同价（无峰谷）',
         periodUnknown: '价格未知',
         costUnknown: '未知',
         costFree: '免费',
+        costPlan: '套餐额度',
+        planTurn: '本轮消耗套餐额度',
+        tipPlanNote: '该模型使用订阅套餐额度，无法按 token 计算单轮金额。',
+        tipSessionPlan: '套餐额度轮次：{count}',
         costUnknownLine: '该模型的计费价格未知，本轮金额未计入。',
         tipProvider: '提供方：{provider}',
         tipUnknownNote:
@@ -353,10 +358,15 @@ window.__ModuleLoader__.load({
         tipPeriod: 'Billing period: {period}',
         periodPeak: 'peak (list price)',
         periodOffPeak: 'off-peak (50%)',
+        periodPlan: 'subscription plan quota (no per-turn price)',
         periodFlat: 'flat price (all day)',
         periodUnknown: 'price unknown',
         costUnknown: 'Unknown',
         costFree: 'Free',
+        costPlan: 'Plan quota',
+        planTurn: 'This turn consumed plan quota',
+        tipPlanNote: 'This model bills a subscription plan, so the turn has no per-token amount.',
+        tipSessionPlan: 'Plan-quota turns: {count}',
         costUnknownLine: 'No price is known for this model, so this turn is not counted.',
         tipProvider: 'Provider: {provider}',
         tipUnknownNote:
@@ -544,7 +554,11 @@ window.__ModuleLoader__.load({
       // Unknown / free turns are not priced by the DeepSeek peak/off-peak table,
       // so they never carry a 峰/谷 tag (an explicit catalog period is flat).
       const status = statusOf(entry);
-      if (status === 'unknown') return undefined;
+      // Only models priced by DeepSeek's peak/off-peak table carry the tag.
+      if (status !== 'priced') return undefined;
+      if (entry.pricing !== undefined && entry.pricing !== 'deepseek') return undefined;
+      const provider = entry.provider === null || entry.provider === undefined ? undefined : String(entry.provider);
+      if (provider !== undefined && !provider.toLowerCase().startsWith('deepseek')) return undefined;
       if (entry.period === 'peak' || entry.period === 'offpeak' || entry.period === 'flat') {
         return entry.period;
       }
@@ -598,6 +612,7 @@ window.__ModuleLoader__.load({
       if (!entry || typeof entry !== 'object') return 'unknown';
       if (entry.empty === true) return 'empty';
       if (entry.pricing === 'free') return 'free';
+      if (entry.pricing === 'plan') return 'plan';
       if (entry.pricing === 'unknown') return 'unknown';
       if (entry.pricing === 'deepseek' || entry.pricing === 'catalog') return 'priced';
       if (entry.costMicro === null || entry.costMicro === undefined) return 'unknown';
@@ -685,6 +700,7 @@ window.__ModuleLoader__.load({
       const target = currency || activeCurrency();
       const status = statusOf(entry);
       if (status === 'free') return 0;
+      if (status === 'plan') return null;
       if (status === 'unknown') return null;
       if (target === 'USD') {
         if (entry.costUsdMicro !== undefined && entry.costUsdMicro !== null) {
@@ -722,6 +738,7 @@ window.__ModuleLoader__.load({
       // symbol: the user reads "本轮 ¥??" / "本轮 ¥0" instead of a bare word.
       if (status === 'unknown') return `${symbol}??`;
       if (status === 'free') return `${symbol}0`;
+      if (status === 'plan') return t('costPlan');
       const micro = entryMicro(entry, target);
       if (micro === null) return `${symbol}??`;
       return `${approxPrefix(entry, target)}${money(micro / 1e6, target)}`;
@@ -855,7 +872,9 @@ window.__ModuleLoader__.load({
       const lines = [t('tipModel', { model: info.model })];
       if (info.provider && info.provider !== info.model) lines.push(t('tipProvider', { provider: info.provider }));
       const periodKey =
-        detail.status === 'unknown'
+        detail.status === 'plan'
+          ? 'periodPlan'
+          : detail.status === 'unknown'
           ? 'periodUnknown'
           : detail.kind === 'legacy' || detail.flat === true
             ? 'periodFlat'
@@ -879,6 +898,7 @@ window.__ModuleLoader__.load({
       if (info.mixed) lines.push(t('tipMixed', { count: info.routes }));
       if (info.assumed) lines.push(t('tipAssumed', {}));
       if (info.status === 'unknown') lines.push(t('tipUnknownNote', { amount: `${symbolFor()}??` }));
+      if (info.status === 'plan') lines.push(t('tipPlanNote', {}));
       if (info.status === 'free') lines.push(t('tipFreeNote', { amount: `${symbolFor()}0` }));
       if (info.status === 'priced' && info.approx) lines.push(t('tipCatalogNote', { rate: String(APPROX_CNY_PER_USD) }));
       if (info.pricing === 'deepseek') {
@@ -904,6 +924,7 @@ window.__ModuleLoader__.load({
         t('tipSessionScope', { turn: session.total, priced: session.priced }),
       ];
       if (Number(session.free) > 0) lines.splice(3, 0, t('tipSessionFree', { count: group(session.free) }));
+      if (Number(session.plan) > 0) lines.splice(3, 0, t('tipSessionPlan', { count: group(session.plan) }));
       if (Number(session.webFee) > 0) lines.splice(3, 0, t('tipSessionWeb', { amount: money(session.webFee) }));
       if (session.sessionId) lines.push(t('tipSessionId', { id: session.sessionId }));
       if (session.partial) lines.push(t('tipSessionMissing', { turns: summarizeTurns(session.missing, t) }));
@@ -925,6 +946,13 @@ window.__ModuleLoader__.load({
         return [
           t('tipAmountTitle', { currency: currencyName() }),
           t('tipAmountTotal', { amount: `${symbolFor()}0` }),
+        ];
+      }
+      if (detail.status === 'plan') {
+        return [
+          t('tipAmountTitle', { currency: currencyName() }),
+          t('tipAmountTotal', { amount: t('costPlan') }),
+          t('tipPlanNote', {}),
         ];
       }
       if (!detail.price) return [];
@@ -1548,6 +1576,7 @@ window.__ModuleLoader__.load({
       let sum = 0;
       let priced = 0;
       let free = 0;
+      let plan = 0;
       let approx = false;
       let sessionTokens = 0;
       let webFee = 0;
@@ -1556,6 +1585,11 @@ window.__ModuleLoader__.load({
       for (const entry of list) {
         if (entry.empty === true) continue;
         const status = statusOf(entry);
+        if (status === 'plan') {
+          plan += 1;
+          amounts.push({ turn: Number(entry.turn), text: t('costPlan') });
+          continue;
+        }
         const costMicro = entryCostMicro(entry, currency, storedRecord);
         if (costMicro === null) {
           missing.push(Number(entry.turn));
@@ -1573,26 +1607,29 @@ window.__ModuleLoader__.load({
       return {
         own,
         turnText: entryAmountText(own, currency, t),
-        ownMicro: entryCostMicro(own, currency, storedRecord),
+        ownMicro: statusOf(own) === 'plan' ? null : entryCostMicro(own, currency, storedRecord),
         session: {
           total: ownTurn,
           sum,
           priced,
           free,
+          plan,
           approx,
           amountText:
             priced === 0 && missing.length > 0
               ? `${symbolFor(currency)}??`
-              : sum === 0 && missing.length === 0 && free > 0
-                ? `${symbolFor(currency)}0`
-                : `${approx ? '≈' : ''}${money(sum, currency)}`,
+              : priced === 0 && plan > 0
+                ? t('costPlan')
+                : sum === 0 && missing.length === 0 && free > 0
+                  ? `${symbolFor(currency)}0`
+                  : `${approx ? '≈' : ''}${money(sum, currency)}`,
           tokens: sessionTokens,
           webFee,
           missing,
           amounts,
           // With no priced turn the amount is genuinely unknown, not a lower
           // bound of a known sum, so the footer says 未知 without `≥`.
-          partial: missing.length > 0 && priced > 0,
+          partial: (missing.length > 0 || plan > 0) && priced > 0,
           sessionId: sessionId || '',
         },
       };
@@ -1617,7 +1654,7 @@ window.__ModuleLoader__.load({
         }
       }
       if (price === undefined && kind !== undefined) price = priceRate(kind, peak, currency);
-      const micro = status === 'unknown' ? null : status === 'free' ? 0 : entryMicro(own, currency);
+      const micro = status === 'unknown' || status === 'plan' ? null : status === 'free' ? 0 : entryMicro(own, currency);
       const total = micro === null ? null : micro / 1e6;
       const web = {
         search: Number(own.webSearchRequests) || 0,
@@ -1827,9 +1864,11 @@ window.__ModuleLoader__.load({
       const turnLabel =
         turnText === undefined
           ? undefined
-          : tag === '' || tag === undefined
-            ? t('badge', { amount: turnText })
-            : `${tag} ${t('badge', { amount: turnText })}`;
+          : ownStatus === 'plan'
+            ? t('planTurn')
+            : tag === '' || tag === undefined
+              ? t('badge', { amount: turnText })
+              : `${tag} ${t('badge', { amount: turnText })}`;
       const sessionAmountText =
         session === undefined
           ? ''
@@ -1869,7 +1908,9 @@ window.__ModuleLoader__.load({
           : panel.kind === 'turn'
             ? turnText === undefined
               ? ''
-              : turnText
+              : ownStatus === 'plan'
+                ? t('costPlan')
+                : turnText
             : session === undefined
               ? ''
               : `${session.partial ? '≥ ' : ''}${sessionAmountText}`;
@@ -2608,7 +2649,9 @@ window.__ModuleLoader__.load({
           },
           session.error
             ? '—'
-            : session.turns > 0 && amountMicroIn(session) === 0 && Number(session.freeTurns) > 0 && (session.missingTurns || []).length === 0
+            : session.turns > 0 && amountMicroIn(session) === 0 && Number(session.planTurns) > 0
+              ? t('costPlan')
+              : session.turns > 0 && amountMicroIn(session) === 0 && Number(session.freeTurns) > 0 && (session.missingTurns || []).length === 0
               ? `${symbolFor()}0`
               : session.turns > 0 && amountMicroIn(session) === 0 && (session.missingTurns || []).length > 0
                 ? `${symbolFor()}??`

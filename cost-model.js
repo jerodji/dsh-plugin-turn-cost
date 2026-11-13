@@ -30,7 +30,7 @@ export const PROJECTION_KEY = 'turnCost';
 
 /** Bump when the state/view shape changes; the projection cache is versioned. */
 /** Bumped when the projection state or its client-visible view changes shape. */
-export const COST_MODEL_VERSION = 4;
+export const COST_MODEL_VERSION = 5;
 
 /** Per-successful-request price of the Web Search / Fetch APIs, in micro-CNY. */
 export const SEARCH_REQUEST_MICRO = 5000;
@@ -141,10 +141,70 @@ export function isDeepSeekProvider(provider) {
   return String(provider || '').toLowerCase().startsWith('deepseek');
 }
 
+/**
+ * Providers that bill a subscription plan instead of per-token prices. Their
+ * turns cannot be priced per request, so the client shows "本轮消耗套餐额度".
+ *
+ * Detection is offline and ordered: the pi-ai provider definitions the app
+ * ships mark OAuth subscriptions with `isSubscription: true` (the loader puts
+ * those ids in `priceBook.plans`); API-key plan providers (token-plan / coding
+ * plans) are recognised by their id. A small built-in list covers the case where
+ * no provider metadata directory is readable (headless builds, tests).
+ */
+export const KNOWN_PLAN_PROVIDERS = [
+  'openai-codex',
+  'github-copilot',
+  'kimi-coding',
+  'zai-coding-cn',
+  'qwen-token-plan',
+  'qwen-token-plan-cn',
+  'xiaomi-token-plan',
+];
+
+const PLAN_PROVIDER_PATTERN = /(?:^|[-_])(?:token-plan|coding)(?:[-_]|$)/i;
+
+let planProviders = new Set();
+
+/**
+ * Replace the subscription-plan provider set with the ids the Host learned from
+ * credential records (OAuth grants) and provider metadata. Called once at
+ * startup, before any Session fold runs.
+ */
+export function setPlanProviders(ids) {
+  const next = new Set();
+  for (const id of Array.isArray(ids) ? ids : []) {
+    const text = String(id || '').trim().toLowerCase();
+    if (text !== '') next.add(text);
+  }
+  planProviders = next;
+  return planProviders;
+}
+
+function planProviderSet() {
+  const plans = priceBook && Array.isArray(priceBook.plans) ? priceBook.plans : [];
+  const merged = new Set(planProviders);
+  for (const id of plans) merged.add(String(id).toLowerCase());
+  return merged;
+}
+
+export function isPlanProvider(provider) {
+  const id = String(provider || '').toLowerCase();
+  if (id === '') return false;
+  if (planProviderSet().has(id)) return true;
+  if (KNOWN_PLAN_PROVIDERS.includes(id)) return true;
+  return PLAN_PROVIDER_PATTERN.test(id);
+}
+
 /** Resolve one turn's price: which scheme applies and what it costs. */
 export function resolvePricing(provider, model, tokens, peak) {
   const hasUsage = (Number(tokens && tokens.total) || 0) > 0;
   if (!hasUsage) return { pricing: 'empty', costMicro: 0, costUsdMicro: 0, approxCny: false, rates: null };
+  if (isPlanProvider(provider)) {
+    // Subscription plans (ChatGPT Pro, GitHub Copilot, GLM coding plans, token
+    // plans) have no per-request price, so no amount is fabricated: the client
+    // shows the plan-quota wording and the session total skips this turn.
+    return { pricing: 'plan', costMicro: null, costUsdMicro: null, approxCny: false, rates: null };
+  }
   const kind = isDeepSeekProvider(provider) ? classifyModel(model) : undefined;
   if (kind !== undefined) {
     const cny = costMicroOf(tokens, kind, peak);
@@ -335,6 +395,7 @@ export function createState(sessionId, inheritedEventCount = 0) {
     sessionCostMicro: 0,
     sessionCostUsdMicro: 0,
     sessionFreeTurns: 0,
+    sessionPlanTurns: 0,
     sessionTokens: emptyTokens(),
     // Billed web-tool totals for this Session: successful search queries,
     // successful fetches, auxiliary Messages search requests, and the amount
@@ -432,7 +493,8 @@ function finalizeTurn(state, open, endedAt) {
   // A turn with no settled usage (aborted before its assistant message) stays
   // "empty": it shows no footer row, so its web fee is counted in the record but
   // not charged — that keeps the footer's session sum and this total equal.
-  const chargeable = hasUsage && price.pricing !== 'unknown';
+  const chargeable =
+    hasUsage && price.pricing !== 'unknown' && price.pricing !== 'plan';
   const searchFeeMicro = chargeable ? billedSearchRequests * SEARCH_REQUEST_MICRO : 0;
   const fetchFeeMicro = chargeable ? billedFetchRequests * FETCH_REQUEST_MICRO : 0;
   const webFeeMicro = searchFeeMicro + fetchFeeMicro;
@@ -449,8 +511,9 @@ function finalizeTurn(state, open, endedAt) {
     endedAt: Number(endedAt) || 0,
     model: hasUsage ? model || FALLBACK_MODEL : null,
     provider: hasUsage ? provider || null : null,
-    // 'deepseek' | 'catalog' | 'free' | 'unknown' | 'empty'
+    // 'deepseek' | 'catalog' | 'free' | 'plan' | 'unknown' | 'empty'
     pricing: price.pricing,
+    plan: price.pricing === 'plan',
     approxCny: price.approxCny,
     rates: price.rates,
     peak,
@@ -483,6 +546,7 @@ function finalizeTurn(state, open, endedAt) {
     sessionCostMicro,
     sessionCostUsdMicro,
     sessionFreeTurns: state.sessionFreeTurns + (price.pricing === 'free' ? 1 : 0),
+    sessionPlanTurns: state.sessionPlanTurns + (price.pricing === 'plan' ? 1 : 0),
     sessionTokens: addSessionTokens(state.sessionTokens, tokens),
     sessionWeb: {
       search: state.sessionWeb.search + searchRequests,
@@ -649,8 +713,10 @@ export function viewOf(state) {
       costMicro: state.sessionCostMicro,
       costUsdMicro: state.sessionCostUsdMicro,
       turns: state.turns.length,
-      pricedTurns: state.turns.length - state.missingTurns.length,
+      pricedTurns:
+        state.turns.length - state.missingTurns.length - state.sessionPlanTurns,
       freeTurns: state.sessionFreeTurns,
+      planTurns: state.sessionPlanTurns,
       missingTurns: state.missingTurns,
       priceBook: priceBookInfo(),
       tokens: state.sessionTokens,

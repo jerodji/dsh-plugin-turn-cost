@@ -47,6 +47,7 @@ async function sessionSummary(sessionQuery, sessionId) {
     turns: toNumber(view.session && view.session.turns),
     pricedTurns: toNumber(view.session && view.session.pricedTurns),
     freeTurns: toNumber(view.session && view.session.freeTurns),
+    planTurns: toNumber(view.session && view.session.planTurns),
     missingTurns: Array.isArray(view.session && view.session.missingTurns)
       ? view.session.missingTurns.slice()
       : [],
@@ -179,6 +180,7 @@ async function buildFullState(ctx) {
         turns: summary.turns,
         pricedTurns: summary.pricedTurns,
         freeTurns: summary.freeTurns,
+        planTurns: summary.planTurns,
         missingTurns: summary.missingTurns,
         tokens: summary.tokens,
         updatedAt: summary.updatedAt,
@@ -196,6 +198,8 @@ async function buildFullState(ctx) {
         costUsdMicro: 0,
         turns: 0,
         pricedTurns: 0,
+        freeTurns: 0,
+        planTurns: 0,
         missingTurns: [],
         tokens: 0,
         updatedAt: 0,

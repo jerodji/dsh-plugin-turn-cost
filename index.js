@@ -17,7 +17,7 @@ import {
   PROJECTION_KEY,
   createState,
   foldEvent,
-  priceBookInfo,
+  setPlanProviders,
   setPriceBook,
   viewOf,
 } from './cost-model.js';
@@ -62,6 +62,35 @@ export async function apply(ctx) {
   } else if (typeof ctx.logger?.warn === 'function') {
     ctx.logger.warn(new Error('turn-cost: bundled price catalog unavailable; non-DeepSeek models will be unknown'));
   }
+
+  // Subscription detection: an OAuth grant stored for llm-pi-ai means that
+  // provider is billed by a plan (ChatGPT Plus/Pro, Claude Pro/Max, Copilot,
+  // Kimi coding), not per token. The credential seam reports records without
+  // values, which is exactly the "is this route a subscription" fact we need.
+  ctx.inject(['credentials'], (credentialCtx) => {
+    Promise.resolve()
+      .then(() => credentialCtx.credentials.listRecords())
+      .then((records) => {
+        const plans = [];
+        for (const record of Array.isArray(records) ? records : []) {
+          const key = String(record && record.key ? record.key : '');
+          const slash = key.indexOf('/');
+          if (slash < 0 || key.slice(0, slash) !== 'llm-pi-ai') continue;
+          if (record.kind === 'api-key') continue;
+          const id = key.slice(slash + 1);
+          if (id !== '' && !plans.includes(id)) plans.push(id);
+        }
+        setPlanProviders(plans);
+        if (typeof credentialCtx.logger?.info === 'function') {
+          credentialCtx.logger.info(`turn-cost: subscription providers ${plans.length > 0 ? plans.join(', ') : '(none)'}`);
+        }
+      })
+      .catch((error) => {
+        if (typeof credentialCtx.logger?.warn === 'function') {
+          credentialCtx.logger.warn(new Error(`turn-cost: cannot read credential records: ${String(error)}`));
+        }
+      });
+  });
 
   await ctx.sessionProjections.register(TURN_COST_PROJECTION);
   if (typeof ctx.logger?.info === 'function') {
