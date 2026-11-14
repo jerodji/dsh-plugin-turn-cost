@@ -157,12 +157,12 @@ localStorage 记录按会话分组、轮次以 `id` 为键，便于按会话 ID 
 
 ### 订阅套餐（1.2.0）
 
-订阅制提供商（ChatGPT Pro、GitHub Copilot、Claude Pro/Max、GLM / Kimi Coding、Qwen / 小米 Token Plan 等）按套餐额度计费，单轮没有可计算的 token 价格，因此：
+订阅制提供商（ChatGPT Pro、GitHub Copilot、Claude Pro/Max、GLM / Kimi Coding、Qwen / 小米 Token Plan 等）按订阅额度计费，单轮没有可计算的 token 价格，因此：
 
 - 本轮按钮显示「本轮消耗订阅额度」，不带金额、不带 `(峰)/(谷)`；
-- 金额明细里合计为「套餐额度」，并附一行说明；
+- 金额明细里合计为「订阅额度」，并附一行说明；
 - 这些轮次不计入会话金额合计；若前面已有可计价轮次，会话金额显示 `≥ ¥x`；
-- 设置页的会话列表里，纯套餐会话显示「套餐额度」。
+- 设置页的会话列表里，纯套餐会话显示「订阅额度」。
 
 检测方式完全离线：DSH 凭据服务中如果某提供商是 OAuth 登录（`grant` 记录），即视为订阅套餐（目录里的美元价只是列表参考价，不代表实际按 token 扣费）；`token-plan` / `coding` 类的提供商 id（如 `zai-coding-cn`）同样视为套餐。按量计费的提供商（DeepSeek、普通第三方 API）不受影响。
 

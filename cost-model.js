@@ -143,7 +143,7 @@ export function isDeepSeekProvider(provider) {
 
 /**
  * Providers that bill a subscription plan instead of per-token prices. Their
- * turns cannot be priced per request, so the client shows "本轮消耗套餐额度".
+ * turns cannot be priced per request, so the client shows "本轮消耗订阅额度".
  *
  * Detection is offline and ordered: the pi-ai provider definitions the app
  * ships mark OAuth subscriptions with `isSubscription: true` (the loader puts
