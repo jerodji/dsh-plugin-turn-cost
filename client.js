@@ -202,7 +202,7 @@ window.__ModuleLoader__.load({
         costUnknown: '未知',
         costFree: '免费',
         costPlan: '套餐额度',
-        planTurn: '本轮消耗套餐额度',
+        planTurn: '本轮消耗订阅额度',
         tipPlanNote: '该模型使用订阅套餐额度，无法按 token 计算单轮金额。',
         tipSessionPlan: '套餐额度轮次：{count}',
         costUnknownLine: '该模型的计费价格未知，本轮金额未计入。',
