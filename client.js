@@ -202,6 +202,7 @@ window.__ModuleLoader__.load({
         costUnknown: '未知',
         costFree: '免费',
         costPlan: '订阅额度',
+        sessionPlanQuota: '会话消耗订阅额度',
         planTurn: '本轮消耗订阅额度',
         tipPlanNote: '该模型使用订阅额度计费，无法按 token 计算单轮金额。',
         tipSessionPlan: '订阅额度轮次：{count}',
@@ -364,6 +365,7 @@ window.__ModuleLoader__.load({
         costUnknown: 'Unknown',
         costFree: 'Free',
         costPlan: 'Subscription quota',
+        sessionPlanQuota: 'Session consumed subscription quota',
         planTurn: 'This turn consumed subscription quota',
         tipPlanNote: 'This model bills a subscription, so the turn has no per-token amount.',
         tipSessionPlan: 'Subscription-quota turns: {count}',
@@ -1006,6 +1008,27 @@ window.__ModuleLoader__.load({
       return lines;
     }
 
+    /** Capitalized reasoning effort suffix ("high" → " High"). */
+    function effortSuffix(effort) {
+      if (typeof effort !== 'string') return '';
+      const trimmed = effort.trim();
+      if (trimmed === '' || trimmed.toLowerCase() === 'none') return '';
+      return ` ${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+    }
+
+    /** Footer label: catalog model name plus the turn's reasoning effort. */
+    function modelLabelOf(entry) {
+      if (!entry || typeof entry !== 'object') return undefined;
+      const name =
+        typeof entry.modelName === 'string' && entry.modelName.length > 0
+          ? entry.modelName
+          : typeof entry.model === 'string' && entry.model.length > 0
+            ? entry.model
+            : undefined;
+      if (name === undefined) return undefined;
+      return `${name}${effortSuffix(entry.effort)}`;
+    }
+
     function translate(t, key, params) {
       if (typeof t !== 'function') return String(key);
       try {
@@ -1429,6 +1452,12 @@ window.__ModuleLoader__.load({
             startedAt: Number(entry.startedAt) || 0,
             endedAt: Number(entry.endedAt) || 0,
             model: typeof entry.model === 'string' ? entry.model : null,
+            modelName: typeof entry.modelName === 'string' ? entry.modelName : null,
+            effort: typeof entry.effort === 'string' ? entry.effort : null,
+            provider: typeof entry.provider === 'string' ? entry.provider : null,
+            pricing: typeof entry.pricing === 'string' ? entry.pricing : null,
+            plan: entry.plan === true,
+            approxCny: entry.approxCny === true,
             peak: entry.peak === true,
             period: periodOf(entry) || null,
             tokens: {
@@ -1626,6 +1655,9 @@ window.__ModuleLoader__.load({
           tokens: sessionTokens,
           webFee,
           missing,
+          // A plan-only Session has no priced turn, so its button says
+          // 会话消耗订阅额度 rather than a money amount.
+          planOnly: priced === 0 && missing.length === 0 && plan > 0,
           amounts,
           // With no priced turn the amount is genuinely unknown, not a lower
           // bound of a known sum, so the footer says 未知 without `≥`.
@@ -1682,7 +1714,7 @@ window.__ModuleLoader__.load({
         totalTokens: Number(tokens.total) || detail.hit + detail.miss + detail.write + detail.output,
       };
       const info = {
-        model: own.model || FALLBACK_MODEL,
+        model: modelLabelOf(own) || own.model || FALLBACK_MODEL,
         provider: own.provider || '',
         assumed: !own.model,
         mixed: false,
@@ -1876,10 +1908,14 @@ window.__ModuleLoader__.load({
             ? session.amountText
             : `${session.approx ? '≈' : ''}${money(session.sum)}`;
 
+      const modelText = row !== undefined ? modelLabelOf(row.own) : undefined;
+
       const sessionLabel =
         session === undefined
           ? undefined
-          : t(session.partial ? 'sessionPartial' : 'session', { amount: sessionAmountText });
+          : session.planOnly
+            ? t('sessionPlanQuota')
+            : t(session.partial ? 'sessionPartial' : 'session', { amount: sessionAmountText });
       const openPanelAt = (kind, event) => {
         if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
         // Read the geometry while the event is still being dispatched. React
@@ -1983,6 +2019,17 @@ window.__ModuleLoader__.load({
               gap: 0,
             },
           },
+          modelText !== undefined
+            ? h(
+                'span',
+                {
+                  key: 'model',
+                  'data-dsh-turn-model': 'true',
+                  style: { ...MUTED, paddingRight: 12 },
+                },
+                modelText,
+              )
+            : null,
           hasTurn ? trigger('turn', { 'data-dsh-turn-cost': String(ownTurn) }, turnLabel) : null,
           hasSession
             ? trigger(

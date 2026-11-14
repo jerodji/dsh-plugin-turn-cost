@@ -101,6 +101,7 @@ function readCatalogDir(dir) {
         if (!providers[provider]) providers[provider] = {};
         if (providers[provider][modelId] !== undefined) continue;
         providers[provider][modelId] = {
+          ...(typeof record.name === 'string' && record.name !== '' ? { name: record.name } : {}),
           input,
           output,
           cacheRead: Number.isFinite(Number(cost.cacheRead)) ? Number(cost.cacheRead) : 0,

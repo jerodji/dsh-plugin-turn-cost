@@ -17,13 +17,13 @@ import {
   PROJECTION_KEY,
   createState,
   foldEvent,
+  mergeModelNames,
   setPlanProviders,
   setPriceBook,
   viewOf,
 } from './cost-model.js';
 import { loadPriceCatalog } from './price-catalog.js';
 import { STATE_ROUTE, handleStateRequest } from './billing.js';
-
 export const inject = ['sessionProjections'];
 
 /** Identity-only schemas: the fold produces plain JSON, so no validation is needed. */
@@ -46,6 +46,50 @@ export const TURN_COST_PROJECTION = {
   },
 };
 
+/**
+ * Resolve provider/model display names in the background. Each provider lookup
+ * is bounded so a slow (or offline) adapter cannot stall the Host.
+ */
+async function resolveModelNames(ctx, llm) {
+  const names = {};
+  try {
+    for (const provider of llm.listProviders()) {
+      const providerId = provider && typeof provider.id === 'string' ? provider.id : '';
+      if (providerId === '') continue;
+      const models = await withTimeout(Promise.resolve(llm.listModels(providerId)), 2000);
+      for (const model of Array.isArray(models) ? models : []) {
+        if (model && typeof model.id === 'string' && typeof model.name === 'string' && model.name.length > 0) {
+          names[`${providerId}\u0000${model.id}`] = model.name;
+        }
+      }
+    }
+    const count = mergeModelNames(names);
+    if (typeof ctx.logger?.info === 'function') {
+      ctx.logger.info(`turn-cost: model display names loaded (${count})`);
+    }
+  } catch (error) {
+    if (typeof ctx.logger?.warn === 'function') {
+      ctx.logger.warn(new Error(`turn-cost: cannot resolve model display names: ${String(error)}`));
+    }
+  }
+}
+
+function withTimeout(promise, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      },
+    );
+  });
+}
+
 export async function apply(ctx) {
   // Offline price source: the pi-ai provider catalogs bundled with the app.
   // Loading happens once per Host process start and costs no network request;
@@ -61,6 +105,11 @@ export async function apply(ctx) {
     }
   } else if (typeof ctx.logger?.warn === 'function') {
     ctx.logger.warn(new Error('turn-cost: bundled price catalog unavailable; non-DeepSeek models will be unknown'));
+  }
+
+  await ctx.sessionProjections.register(TURN_COST_PROJECTION);
+  if (typeof ctx.logger?.info === 'function') {
+    ctx.logger.info(`turn-cost: projection "${PROJECTION_KEY}" v${COST_MODEL_VERSION} registered`);
   }
 
   // Subscription detection: an OAuth grant stored for llm-pi-ai means that
@@ -92,10 +141,15 @@ export async function apply(ctx) {
       });
   });
 
-  await ctx.sessionProjections.register(TURN_COST_PROJECTION);
-  if (typeof ctx.logger?.info === 'function') {
-    ctx.logger.info(`turn-cost: projection "${PROJECTION_KEY}" v${COST_MODEL_VERSION} registered`);
-  }
+  // Display names for the footer label. The model catalog lives behind the
+  // asynchronous `llm` service and some adapters may query the network, so the
+  // projection did NOT wait for it: viewOf resolves names at serialization time.
+  ctx.inject(['llm'], (llmCtx) => {
+    const llm = llmCtx.llm;
+    if (llm && typeof llm.listProviders === 'function' && typeof llm.listModels === 'function') {
+      void resolveModelNames(llmCtx, llm);
+    }
+  });
 
   // The Client half has no package-private Host RPC, so the Settings page and
   // the balance reminder read their data from this small same-origin route.

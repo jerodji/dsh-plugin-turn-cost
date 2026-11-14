@@ -30,7 +30,7 @@ export const PROJECTION_KEY = 'turnCost';
 
 /** Bump when the state/view shape changes; the projection cache is versioned. */
 /** Bumped when the projection state or its client-visible view changes shape. */
-export const COST_MODEL_VERSION = 5;
+export const COST_MODEL_VERSION = 6;
 
 /** Per-successful-request price of the Web Search / Fetch APIs, in micro-CNY. */
 export const SEARCH_REQUEST_MICRO = 5000;
@@ -106,6 +106,17 @@ export function setPriceBook(book) {
     loadedAt: Number(book.loadedAt) || Date.now(),
     models: Number(book.models) || 0,
   };
+  // Catalog names are a fallback for the footer label; the llm service supplies
+  // the exact name the model picker shows and overwrites these when available.
+  for (const providerId of Object.keys(priceBook.providers)) {
+    const models = priceBook.providers[providerId];
+    for (const modelId of Object.keys(models)) {
+      const record = models[modelId];
+      if (record && typeof record.name === 'string' && record.name !== '') {
+        modelNames.set(`${providerId}\u0000${modelId}`, record.name);
+      }
+    }
+  }
   return priceBook;
 }
 
@@ -137,7 +148,40 @@ export function catalogPriceFor(provider, model) {
   return { input, output, cacheRead: cacheRead ?? 0, cacheWrite: cacheWrite ?? 0 };
 }
 
-export function isDeepSeekProvider(provider) {
+export // Display names come from the host llm catalog (`listModels`), resolved once at
+// startup. Entries only carry the raw model id, so the fold stores the resolved
+// name and the reasoning effort observed for that turn.
+let modelNames = new Map();
+
+export function setModelNames(names) {
+  modelNames = new Map();
+  if (names && typeof names === 'object') {
+    for (const [key, value] of Object.entries(names)) {
+      if (typeof key === 'string' && typeof value === 'string' && value.length > 0) modelNames.set(key, value);
+    }
+  }
+  return modelNames.size;
+}
+
+/** Add display names without dropping existing entries (catalog fallbacks stay). */
+export function mergeModelNames(names) {
+  let changed = 0;
+  for (const [key, value] of Object.entries(names || {})) {
+    if (typeof key !== 'string' || typeof value !== 'string' || value.length === 0) continue;
+    if (modelNames.get(key) !== value) {
+      modelNames.set(key, value);
+      changed += 1;
+    }
+  }
+  return changed;
+}
+
+function modelNameOf(provider, model) {
+  if (typeof provider !== 'string' || typeof model !== 'string') return undefined;
+  return modelNames.get(`${provider}\u0000${model}`) || modelNames.get(`*\u0000${model}`);
+}
+
+function isDeepSeekProvider(provider) {
   return String(provider || '').toLowerCase().startsWith('deepseek');
 }
 
@@ -406,6 +450,10 @@ export function createState(sessionId, inheritedEventCount = 0) {
     // across turns so a fetch-only turn can still be billed after an API-mode
     // search, and used only for the fetch fee (search fees are per-call exact).
     webMode: null,
+    // Latest reasoning effort seen in a provider request header. The harness
+    // records that header only on the first request after a process start, so
+    // the value is carried forward to turns whose own header was not logged.
+    lastEffort: undefined,
     missingTurns: [],
     inheritedEventCount: Number(inheritedEventCount) || 0,
     updatedAt: 0,
@@ -445,6 +493,8 @@ function finalizeTurn(state, open, endedAt) {
   const tokens = emptyTokens();
   let model;
   let provider;
+  let lastStep;
+  let lastStepNumber = -1;
   for (const key of Object.keys(open.steps)) {
     const step = open.steps[key];
     addTokens(tokens, {
@@ -456,6 +506,11 @@ function finalizeTurn(state, open, endedAt) {
     });
     model = model || step.model;
     provider = provider || step.provider;
+    const stepNumber = Number(key);
+    if (Number.isFinite(stepNumber) && stepNumber > lastStepNumber) {
+      lastStepNumber = stepNumber;
+      lastStep = step;
+    }
   }
   const turn = Number(open.turn) || 0;
   const hasUsage = tokens.total > 0;
@@ -511,6 +566,12 @@ function finalizeTurn(state, open, endedAt) {
     endedAt: Number(endedAt) || 0,
     model: hasUsage ? model || FALLBACK_MODEL : null,
     provider: hasUsage ? provider || null : null,
+    // Display metadata for the footer label: the catalog name of the model and
+    // the reasoning effort the provider request asked for.
+    modelName: hasUsage && lastStep ? lastStep.modelName : undefined,
+    effort: hasUsage
+      ? (lastStep && lastStep.effort) || (open.request && open.request.effort) || state.lastEffort
+      : undefined,
     // 'deepseek' | 'catalog' | 'free' | 'plan' | 'unknown' | 'empty'
     pricing: price.pricing,
     plan: price.pricing === 'plan',
@@ -661,6 +722,21 @@ export function foldEvent(state, event) {
     };
   }
 
+  if (event.type === 'request/header') {
+    const open = state.open;
+    if (!open) return state;
+    const config = data && data.header && data.header.config;
+    if (!config || typeof config !== 'object') return state;
+    const provider = typeof config.provider === 'string' ? config.provider : undefined;
+    const model = typeof config.model === 'string' ? config.model : undefined;
+    const effort = typeof config.reasoningEffort === 'string' ? config.reasoningEffort : undefined;
+    return {
+      ...state,
+      lastEffort: effort !== undefined ? effort : state.lastEffort,
+      open: { ...open, request: { provider, model, effort } },
+    };
+  }
+
   if (event.type === 'assistant/message' || event.type === 'assistant/attempt') {
     const open = state.open;
     if (!open) return state;
@@ -672,10 +748,18 @@ export function foldEvent(state, event) {
     // Per step the settled sample wins: a retried step is billed once, at the
     // last attempt that actually settled with usage.
     const steps = { ...open.steps };
+    const request = open.request;
+    const requestMatches =
+      request !== undefined &&
+      route !== undefined &&
+      (request.provider === undefined || request.provider === route.provider) &&
+      (request.model === undefined || request.model === route.model);
     steps[step] = {
       tokens: bucketOf(usage),
       model: route ? route.model : undefined,
       provider: route ? route.provider : undefined,
+      effort: requestMatches ? request.effort : undefined,
+      modelName: route ? modelNameOf(route.provider, route.model) : undefined,
     };
     return {
       ...state,
@@ -708,7 +792,16 @@ export function viewOf(state) {
     title: state.title,
     priceVersion: state.priceVersion,
     updatedAt: state.updatedAt,
-    turns: state.turns,
+    // Resolve the display name at view time as well: the Host may still be
+    // fetching the model catalog while the first sessions are replayed, and a
+    // later event republishes the view with the names filled in.
+    turns: state.turns.map((turn) => {
+      if (typeof turn.model === 'string' && turn.model !== '') {
+        const name = modelNameOf(turn.provider, turn.model);
+        if (name !== undefined) return { ...turn, modelName: name };
+      }
+      return turn;
+    }),
     session: {
       costMicro: state.sessionCostMicro,
       costUsdMicro: state.sessionCostUsdMicro,
