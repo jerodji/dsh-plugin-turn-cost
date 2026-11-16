@@ -4,15 +4,15 @@
 
 ```
 用量 19.2k
-(谷) 本轮 ¥0.189    会话 ¥1.048
+DeepSeek-V4.1-Flash High （谷）  本轮 ¥0.189    会话 ¥1.048
 ```
 
 历史轮次的金额**不会随后续对话改变**：
 
 ```
-第 1 轮：(谷) 本轮 ¥0.01    会话 ¥0.01
-第 2 轮：(谷) 本轮 ¥0.02    会话 ¥0.03
-第 3 轮：(谷) 本轮 ¥0.03    会话 ¥0.06
+第 1 轮：DeepSeek-V4.1-Flash High （谷）  本轮 ¥0.01    会话 ¥0.01
+第 2 轮：DeepSeek-V4.1-Flash High （谷）  本轮 ¥0.02    会话 ¥0.03
+第 3 轮：DeepSeek-V4.1-Flash High （谷）  本轮 ¥0.03    会话 ¥0.06
 ```
 
 数字为右对齐小字，**「本轮」和「会话」是两个独立的点击目标**（无悬停提示，键盘 Enter/空格等同点击）。各自弹出一个与官方「用量 1.4M tok」面板同款样式的浮层卡片：
@@ -22,7 +22,7 @@
 
 点背景遮罩或按 Esc 关闭；同时只开一个面板。
 
-行首带**峰谷标记**：`(峰)` 表示该轮结束于高峰时段（北京时间周一至周五 09:00–12:00、14:00–18:00），`(谷)` 表示低谷（其余时间，按 5 折计价）。标记按**该轮自己的结束时间**判断；已下线的 `deepseek-chat` / `deepseek-reasoner` 全天同价、不区分峰谷，因此不加标记（未知模型与无用量轮次本就不显示徽标）。
+**峰谷标记挂在模型名与推理等级之后**：`（峰）` 表示该轮结束于高峰时段（北京时间周一至周五 09:00–12:00、14:00–18:00），`（谷）` 表示低谷（其余时间，按 5 折计价）；「本轮」按钮只显示金额，不带标记。标记按**该轮自己的结束时间**判断；已下线的 `deepseek-chat` / `deepseek-reasoner` 全天同价、不区分峰谷，因此不加标记（未知模型与无用量轮次本就不显示徽标）。
 
 ## 轻量本地数据层（0.2.0）
 
@@ -155,16 +155,23 @@ localStorage 记录按会话分组、轮次以 `id` 为键，便于按会话 ID 
 
 **货币跟随界面语言**：中文界面用 DeepSeek 官方**人民币**价（¥），英文界面用官方**美元**价（$）。两套价目表各自独立（见下方 0.8.0 一节），不做汇率换算；宿主投影始终以人民币微元存储，美元金额在客户端逐轮按 token 桶重算。
 
-### 订阅套餐（1.2.0）
+### 订阅套餐（1.2.0，1.4.3 区分按量 API）
 
-订阅制提供商（ChatGPT Pro、GitHub Copilot、Claude Pro/Max、GLM / Kimi Coding、Qwen / 小米 Token Plan 等）按订阅额度计费，单轮没有可计算的 token 价格，因此：
+月 / 季 / 年套餐（ChatGPT Pro、GitHub Copilot、Claude Pro/Max、SuperGrok、GLM / Kimi Coding、Qwen / 小米 Token Plan 等）按订阅额度计费，单轮没有可计算的 token 价格，因此：
 
-- 本轮按钮显示「本轮消耗订阅额度」，不带金额、不带 `(峰)/(谷)`；整段会话没有已计价轮次时，会话按钮显示「会话消耗订阅额度」，存在已计价轮次时显示 `会话 ≥ ¥12` / `≥ $12`；
+- 本轮按钮显示「本轮消耗订阅额度」，不带金额、不带峰谷标记；整段会话没有已计价轮次时，会话按钮显示「会话消耗订阅额度」，存在已计价轮次时显示 `会话 ≥ ¥12` / `≥ $12`；
 - 金额明细里合计为「订阅额度」，并附一行说明；
 - 这些轮次不计入会话金额合计；若前面已有可计价轮次，会话金额显示 `≥ ¥x`；
 - 设置页的会话列表里，纯套餐会话显示「订阅额度」。
 
-检测方式完全离线：DSH 凭据服务中如果某提供商是 OAuth 登录（`grant` 记录），即视为订阅套餐（目录里的美元价只是列表参考价，不代表实际按 token 扣费）；`token-plan` / `coding` 类的提供商 id（如 `zai-coding-cn`）同样视为套餐。按量计费的提供商（DeepSeek、普通第三方 API）不受影响。
+**订阅套餐与按量 API 的区分（全部离线）**：宿主启动时、投影注册之前完成一次分类，避免历史重放用错规则：
+
+1. pi-ai 提供方的 OAuth 登录带 `isSubscription: true` 元数据（OpenAI / Anthropic / Kimi / Copilot / xAI 等），且该提供方实际存的是 OAuth 凭据（`grant`）→ 套餐；同一提供方存的是 API key → 按量计费。
+2. 订阅适配器（ChatGPT 订阅、Claude Subscription、Grok Subscription、GitHub Copilot、Google Antigravity）没有 pi-ai 元数据，按提供方显示名（`subscription` / `copilot` / `antigravity` / `chatgpt` / `订阅`）识别为套餐。
+3. 仅凭提供方 id 的形状（含 `coding` / `token-plan`）**不再**判定为套餐。这类 id 往往也能用普通 API key 接入并按 token 计费（例如 Z.AI 的 `zai-coding-cn`）：只要实际存的是 API key，就按该模型目录价 × token 计费。只有凭据类型与 OAuth 订阅元数据同时成立，或该提供方只提供订阅型 OAuth、没有 API key 通道时，才按套餐处理。
+4. 其余接入（DeepSeek、OpenRouter 等按 token 扣费的 OAuth 网关、普通 API key）一律按该模型的目录价格 × token 计费，金额照常写入投影与浏览器本地记录。
+
+客观限制：DSH 的 llm 服务不暴露「套餐周期（月/季/年）」与实时额度用量，所以文案统一为「订阅额度」；同一提供方同时支持两种接入时，以实际存储的凭据类型为准；切换凭据后需要重启宿主才会重新分类。分类结果会写入宿主日志（`turn-cost: subscription-plan providers …`）。`COST_MODEL_VERSION` 9 会让旧投影缓存失效并重放一次（1.4.3 修正：不再按 id 形状误判套餐）；1.4.6 升到 10 让 GLM 官方人民币价目重算历史轮次；1.5.0 升到 11，国产模型价格改读本地 `prices/cny-models.json` 并重算历史。
 
 ### 第三方模型、未知与免费（1.1.0）
 
@@ -179,6 +186,67 @@ localStorage 记录按会话分组、轮次以 `id` 为键，便于按会话 ID 
 3. 不再用「模型名包含 flash/pro」这种模糊匹配来定价，因此 `glm-4.5-flash` 这类免费模型不会被误按 DeepSeek Flash 价格计费。
 
 价格目录在宿主启动时**一次性加载**（不联网、不请求官方接口），每轮的计价结果写入投影并落盘，历史轮次不会因后续价格调整而变化；升级后的投影会**重放日志**，旧轮次自动按新规则重算。
+
+### 国产模型本地人民币价目（1.5.0）
+
+DSH 内置的 pi-ai 目录只提供**美元**价，而国产模型官网公布的人民币价并不是美元价 × 汇率（例如 GLM-5.3 官方 ¥8 / ¥28 / ¥2，目录美元 $1.4 / $4.4 / $0.26）。因此插件把国产模型的人民币价目单独放在随包发布的本地文件里：
+
+**`prices/cny-models.json`**（元 / 百万 tokens）
+
+- 按提供方分组，`providerPattern` 限定生效范围：智谱 `^(zai|bigmodel|zhipu)`、Kimi `^(moonshot|kimi)`、千问 `^(qwen|dashscope|alibaba|aliyun)`、豆包 / Seed `^(doubao|volcengine|ark|seed|bytedance)`。这样同一个模型被第三方网关（如 OpenRouter）转售时，不会误用官方人民币价。
+- 每条价格含 `match`（模型 id 正则）、`input`、`output`、`cacheRead`，可选 `cacheWrite`；按上下文长度 / 输出长度分档的模型写成 `tiers`（`maxInput`、`maxOutput` 为开区间上界，最后一档兜底）。
+- **人民币模式**：命中文件时用官方人民币价精确计算，不加 `≈`；**美元模式**：仍用内置美元目录。两张表各自独立，**不做汇率折算**。
+- 文件未收录的模型照旧回落到内置目录美元价 + `≈`（或 `¥??`）；已下线的旧模型不编造价格。
+- 厂商调价时**只改这个 JSON**，然后重启 DSH（宿主启动时读取一次）；不需要改代码或重新打包。
+- 套餐与按量的区分仍先走「订阅套餐」一节：套餐提供方不会进入本表计价；换成按量 API 凭据后才按本表 token 价计费。
+
+来源与主要价格（2026-11-16 查询）：
+
+**智谱 GLM**：<https://docs.bigmodel.cn/cn/guide/start/pricing>
+
+| 模型 | 输入 | 输出 | 缓存命中 |
+| --- | --- | --- | --- |
+| GLM-5.3 | 8 | 28 | 2 |
+| GLM-5.3-Flash | 0.8 | 2.8 | 0.23 |
+| GLM-5.3-FlashX | 2 | 7 | 0.57 |
+| GLM-5.2 | 8 | 28 | 2 |
+| GLM-4.7 | 2 / 3 / 4（按输入、输出分档） | 8 / 14 / 16 | 0.4 / 0.6 / 0.8 |
+| GLM-4.7-Flash | 免费 | 免费 | 免费 |
+
+**Kimi**：<https://platform.kimi.com/docs/pricing/chat>（K3 系列另收缓存写入，默认 5 分钟 TTL 按输入价，1 小时档翻倍；Batch API 为 6 折）
+
+| 模型 | 输入 | 输出 | 缓存命中 | 缓存写入（5 分钟） |
+| --- | --- | --- | --- | --- |
+| kimi-k3.1-pro | 13 | 68 | 1.3 | 13 |
+| kimi-k3.1-pro-highspeed | 26 | 136 | 1.3 | 26 |
+| kimi-k3 | 20 | 100 | 2 | 20 |
+| kimi-k2.7-code | 6.5 | 27 | 1.3 | — |
+| kimi-k2.6 | 6.5 | 27 | 1.1 | — |
+
+**千问 Qwen**：<https://help.aliyun.com/zh/model-studio/model-pricing>（华北 2 北京原价；隐式缓存命中按输入 20%，显式缓存命中 10%、创建 125%，个别模型为固定价）
+
+| 模型 | 输入 | 输出 | 缓存命中 |
+| --- | --- | --- | --- |
+| qwen4-max | 10 | 30 | 0.5（固定） |
+| qwen3.8-max | 12 | 36 | 未公布 |
+| qwen3.7-max | 12 | 36 | 2.4 |
+| qwen-max | 2.4 | 9.6 | 0.48 |
+| qwen3.7-plus（≤256K / >256K） | 2 / 6 | 8 / 24 | 0.4 / 1.2 |
+| qwen-plus（≤128K / 256K / 1M） | 0.8 / 2.4 / 4.8 | 2 / 20 / 48 | 0.16 / 0.48 / 0.96 |
+| qwen-flash（≤128K / 256K / 1M） | 0.15 / 0.6 / 1.2 | 1.5 / 6 / 12 | 0.03 / 0.12 / 0.24 |
+| qwen3-coder-flash（≤32K / 128K / 256K / 1M） | 1 / 1.5 / 2.5 / 5 | 4 / 6 / 10 / 25 | 0.2 / 0.3 / 0.5 / 1 |
+
+**豆包 / Seed（火山方舟）**：<https://www.volcengine.com/docs/82379/1099320>（在线推理常规后付费；缓存命中为输入 20%；缓存存储 0.017 元 / 百万 tokens / 小时另计，本文件未建模）
+
+| 模型 | 输入 | 输出 | 缓存命中 |
+| --- | --- | --- | --- |
+| doubao-seed-2.1-pro | 6 | 30 | 1.2 |
+| doubao-seed-2.1-lite | 0.8 | 2.7 | 0.16 |
+| doubao-seed-2.1-turbo | 3 | 15 | 0.6 |
+| doubao-seed-2.0-pro（≤32K / 128K / 256K） | 3.2 / 4.8 / 9.6 | 16 / 24 / 48 | 0.64 / 0.96 / 1.92 |
+| doubao-seed-2.0-mini（≤32K / 128K / 256K） | 0.2 / 0.4 / 0.8 | 2 / 4 / 8 | 0.04 / 0.08 / 0.16 |
+
+DeepSeek 不使用该文件，继续使用上面的内置官方人民币 / 美元价目与峰谷规则。旧版 Seed 1.6 / 1.5 / doubao-pro 与旧 Kimi、Qwen 模型已下线且官方不再公布价格，文件里不收录，遇到时回落到目录价 + `≈`。`COST_MODEL_VERSION` 11 会让旧投影缓存失效并重放一次，历史国产模型轮次按新价目重算。
 
 按 DeepSeek 官方人民币价格（2026-11-11 查询于 api-docs.deepseek.com，单位：元 / 百万 tokens），高峰时段按下表原价、低谷时段按 **50%** 计价：
 
@@ -203,15 +271,17 @@ localStorage 记录按会话分组、轮次以 `id` 为键，便于按会话 ID 
 - **Messages 模式的辅助请求 token 无法计入**：日志只有 `web/deepseek-search-llm-request` 事件（endpoint / body），没有该辅助请求的 usage，所以这类搜索只显示次数、不折算金额。
 - 官方计费页：<https://api-docs.deepseek.com/zh-cn/guides/search>（¥5 / 1,000 次，仅 HTTP 200 且产生结果的请求计费，失败 / 无结果 / 超时免费）。
 
-## 模型与推理等级（1.3.0 → 1.3.1）
+## 模型与推理等级（1.3.0 → 1.4.0）
 
-- 每轮底部在「本轮」按钮前显示模型名与推理等级，例如 `DeepSeek-V4.1-Flash High`。
-- 模型显示名来自宿主 `llm.listModels()`（启动时解析一次，不联网）；推理等级来自该轮请求头事件的 `config.reasoningEffort`（`high` / `medium` / `low` 等，首字母大写，`none` 不显示）。
-- 同一轮多个 step 时取最后一个有计费用的 step 的模型与等级；历史轮次在投影重放时补齐。
+- 每轮底部在「本轮」按钮前显示模型名与推理等级，例如 `DeepSeek-V4.1-Flash High`；模型名用普通灰色，等级用更浅的三级灰（`--dsw-alias-label-tertiary`）。
+- 模型显示名来自宿主 `llm.listModels()`（启动时解析一次，不联网），离线 pi-ai 目录里的 `name` 作为兜底。
+- **推理等级按轮记录、优先读本地记录**：日志里的 `request/header` 只在进程启动后写一次（之后沿用），不能代表每轮真实选择。插件改为监听宿主 `agent/pre-step` 瀑布事件，取该 step 解出的 `modelSelection.reasoningEffort`（以及 provider/model），按「会话 + 轮次」写入 `~/.dsh/turn-cost-selections.json`（最后执行的 step 覆盖同一轮）；投影折叠时优先用它，取不到才退回请求头 / 最近的已知值。
+- 同一轮多个 step 时取最后一个有计费用的 step 的模型与等级；历史轮次在投影重放时补齐，浏览器本地存储也会保留每轮已记录的模型与等级，重启后显示与上次一致。
+- 旧版本记录过的轮次若当时只能沿用最近一次的等级，仍会保留旧值；新产生的轮次起按真实选择记录。
 
 ## 实现
 
-- **宿主半边** `index.js`：`inject = ['sessionProjections']`，`apply` 注册 `turnCost` 投影（`stateVersion` 跟随 `COST_MODEL_VERSION`（现为 6），`wire.summary: false`，不进入会话列表汇总）。投影状态 `{sessionId, title, turns[], open, sessionCostMicro, sessionTokens, sessionWeb, webMode, missingTurns, inheritedEventCount}` 由 `cost-model.js` 的纯函数折叠得到，可离线单测。折叠除 `assistant/message` 的 usage 外，还消费 `tool/call` / `tool/result`（统计 `web_search` / `web_fetch` 的成功请求数）与 `web/deepseek-search-llm-request`（统计辅助 Messages 搜索数），据此推断本轮走的是新版 API 还是默认 Messages 搜索。
+- **宿主半边** `index.js`：`inject = ['sessionProjections']`，`apply` 注册 `turnCost` 投影（`stateVersion` 跟随 `COST_MODEL_VERSION`（现为 7），`wire.summary: false`，不进入会话列表汇总）。投影状态 `{sessionId, title, turns[], open, sessionCostMicro, sessionTokens, sessionWeb, webMode, missingTurns, inheritedEventCount}` 由 `cost-model.js` 的纯函数折叠得到，可离线单测。折叠除 `assistant/message` 的 usage 外，还消费 `tool/call` / `tool/result`（统计 `web_search` / `web_fetch` 的成功请求数）与 `web/deepseek-search-llm-request`（统计辅助 Messages 搜索数），据此推断本轮走的是新版 API 还是默认 Messages 搜索。
 - **浏览器半边** `client.js`：通过 `conversation.chat.turnTail` 插槽（顺序 30）渲染，不替换任何内置 UI；读取 `useProjection('turnCost')`，并镜像到 localStorage（每条轮次记录含 `peak` 与 `period` 峰谷桶，加载时直接读取）；只 `require('react')` 基线模块，文案走 Client locale 服务（内置 `zh` / `en`），样式只用 `--dsw-alias-*` 主题变量，不写 DOM、不注入全局样式。
 - 会话列表不包含本投影（`summary:false`），只有打开的会话会取全量 `turnCost` 记录。
 - 设置页数据：宿主用 `connection.fetch.register` 注册认证路由 `GET /api/turn-cost/state`（`billing.js`），返回钱包余额、全部会话的费用/标题/工作区归属与工作区汇总；浏览器用同源相对路径 `fetch`，请求头带 `x-dsh-turn-cost: 1`。数据缓存 30 秒（设置页另有 30 秒轮询与手动「刷新」）。没有 Connection 服务的部署会退回 `webServer` 静态路由（并自带 Host / 请求头校验）。
@@ -223,6 +293,9 @@ package.json        插件清单（dsh.bundle.patch + dsh.client）
 cordis.patch.yml    bundle 补丁：插入 turn-cost 插件行
 index.js            宿主半边：turnCost 会话投影 + /api/turn-cost/state 数据路由
 cost-model.js       纯函数：日志折叠 + 计价（宿主与测试共用）
+selection-log.js    逐轮模型选择记录：写入 ~/.dsh/turn-cost-selections.json（agent/pre-step）
+cny-prices.js       本地人民币价目读取/匹配（按提供方、模型、分档匹配单价）
+prices/cny-models.json  国产模型官方人民币价目（元 / 百万 tokens），调价只改这个文件
 billing.js          宿主聚合：逐会话费用 / 标题 / 工作区 + 钱包余额
 client.js           徽标组件 + 本地存储 + 设置页 + 余额提醒浮层
 locale/zh.json      显示元数据（中文）

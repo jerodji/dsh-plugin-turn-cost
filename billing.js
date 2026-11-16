@@ -51,7 +51,9 @@ async function sessionSummary(sessionQuery, sessionId) {
     missingTurns: Array.isArray(view.session && view.session.missingTurns)
       ? view.session.missingTurns.slice()
       : [],
-    tokens: toNumber(view.session && view.session.tokens),
+    // `session.tokens` is the bucket object from the fold; the dashboard needs
+    // the total, so unwrap it instead of coercing the object (which gave NaN/0).
+    tokens: toNumber(view.session && view.session.tokens && view.session.tokens.total),
     updatedAt: toNumber(view.updatedAt),
     header: snapshot.session || null,
   };

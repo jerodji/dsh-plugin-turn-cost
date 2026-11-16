@@ -32,21 +32,32 @@ function candidateDirs() {
 }
 
 /**
- * Provider ids the pi-ai provider definitions mark as subscription plans.
+ * Read each pi-ai provider definition's auth shape.
  *
- * Each `providers/<id>.js` file builds its provider with
- * `createProvider({ id: "…", auth: { oauth: lazyOAuth({ …, isSubscription: true }) } })`.
- * A provider that also declares an `apiKey` auth is left out: it may be billed
- * per token (for example OpenAI / Anthropic with an API key), and mislabelling a
- * metered provider as a plan would hide real spend.
+ * `providers/<id>.js` builds its provider with
+ * `createProvider({ id: "…", auth: { … }, … })`. Two independent facts matter:
+ *
+ * - `oauth: lazyOAuth({ …, isSubscription: true })` marks a provider whose OAuth
+ *   login is a subscription plan (ChatGPT Plus/Pro, Copilot, Claude Pro/Max,
+ *   Kimi Code, SuperGrok). The plan quota, not a token price, pays for it.
+ * - `apiKey: …` marks a route that can be driven with a plain API key. The same
+ *   provider may offer both (OpenAI, Anthropic, Kimi, Copilot), or OAuth that is
+ *   *not* a subscription (OpenRouter), or only an API key (DeepSeek, Z.AI).
+ *
+ * `plans` (OAuth subscription and no API-key route) is the conservative set that
+ * is always a quota plan. `oauthSubscriptions` is the larger set used together
+ * with the credential actually stored for that provider: an OAuth grant on such
+ * a provider is a subscription plan, while an API key on it is metered.
  */
-function readPlanProviders(providersDir) {
+function readProviderAuth(providersDir) {
   const plans = [];
+  const oauthSubscriptions = [];
+  const apiKeyProviders = [];
   let names;
   try {
     names = fs.readdirSync(providersDir);
   } catch {
-    return plans;
+    return { plans, oauthSubscriptions, apiKeyProviders };
   }
   for (const name of names) {
     if (!name.endsWith('.js') || name.endsWith('.models.js')) continue;
@@ -56,14 +67,80 @@ function readPlanProviders(providersDir) {
     } catch {
       continue;
     }
-    if (!/isSubscription\s*:\s*true/.test(source)) continue;
-    if (/\bapiKey\s*:/.test(source)) continue;
+    if (!/createProvider\s*\(/.test(source)) continue;
     const match = source.match(/id\s*:\s*"([^"]+)"/);
     if (match === null) continue;
     const id = match[1];
-    if (!plans.includes(id)) plans.push(id);
+    const subscription = /isSubscription\s*:\s*true/.test(source);
+    const hasApiKey = /\bapiKey\s*:/.test(source);
+    if (subscription) {
+      if (!oauthSubscriptions.includes(id)) oauthSubscriptions.push(id);
+      if (!hasApiKey && !plans.includes(id)) plans.push(id);
+    }
+    if (hasApiKey && !apiKeyProviders.includes(id)) apiKeyProviders.push(id);
+  }
+  return { plans, oauthSubscriptions, apiKeyProviders };
+}
+
+/**
+ * Which providers are quota plans, given the stored credential records.
+ *
+ * An OAuth grant on a provider whose OAuth login is a subscription
+ * (`isSubscription: true`) is a monthly/quarterly/yearly plan: the turn shows
+ * "本轮消耗订阅额度". Everything else — an API key, or an OAuth login that is
+ * merely a sign-in for a metered API (OpenRouter) — is billed per token and is
+ * priced from the model catalog like any other API route.
+ *
+ * Records are `{ key: 'llm-pi-ai/<provider>', kind: 'api-key' | 'grant' | … }`.
+ * A provider with both an API key and an OAuth grant prefers the grant: the
+ * OAuth login is the subscription route the user signed in with.
+ */
+export function planProvidersFromRecords(records, oauthSubscriptions) {
+  const subscriptions = new Set();
+  for (const id of Array.isArray(oauthSubscriptions) ? oauthSubscriptions : []) {
+    subscriptions.add(String(id || '').toLowerCase());
+  }
+  const grants = new Set();
+  for (const record of Array.isArray(records) ? records : []) {
+    const key = String(record && record.key ? record.key : '');
+    const slash = key.indexOf('/');
+    if (slash < 0 || key.slice(0, slash) !== 'llm-pi-ai') continue;
+    if (record.kind === 'api-key') continue;
+    const id = key.slice(slash + 1).toLowerCase();
+    if (id !== '') grants.add(id);
+  }
+  const plans = [];
+  for (const id of grants) {
+    if (subscriptions.has(id) && !plans.includes(id)) plans.push(id);
   }
   return plans;
+}
+
+/**
+ * Display names the subscription adapters give their provider routes. The
+ * `dsh-plugin-subscriptions` package registers plain adapters (`codex`,
+ * `claude`, `grok`, `copilot`, `antigravity`) without pi-ai provider metadata,
+ * so the localized display name is the only offline signal that the route is a
+ * monthly/quarterly/yearly plan rather than a metered API.
+ */
+const SUBSCRIPTION_NAME_PATTERN = /subscription|copilot|antigravity|chatgpt|订阅/i;
+
+/**
+ * Final plan-provider list for the fold: stored OAuth subscriptions plus routes
+ * whose display name names a subscription product. Everything else is priced
+ * per token from the model catalog (an unknown price still shows 未知 rather
+ * than pretending to be a plan).
+ */
+export function detectPlanProviders(catalog, records, providers) {
+  const plans = new Set(
+    planProvidersFromRecords(records, catalog && catalog.oauthSubscriptions).map((id) => String(id).toLowerCase()),
+  );
+  for (const provider of Array.isArray(providers) ? providers : []) {
+    const id = String(provider && provider.id ? provider.id : '').trim().toLowerCase();
+    const name = String(provider && provider.name ? provider.name : '');
+    if (id !== '' && name !== '' && SUBSCRIPTION_NAME_PATTERN.test(name)) plans.add(id);
+  }
+  return [...plans];
 }
 
 function readCatalogDir(dir) {
@@ -129,7 +206,10 @@ export function loadPriceCatalog() {
       typeof providersDirOverride === 'string' && providersDirOverride.length > 0
         ? providersDirOverride
         : path.dirname(dir);
-    book.plans = readPlanProviders(providersDir);
+    const auth = readProviderAuth(providersDir);
+    book.plans = auth.plans;
+    book.oauthSubscriptions = auth.oauthSubscriptions;
+    book.apiKeyProviders = auth.apiKeyProviders;
     return book;
   }
   return undefined;

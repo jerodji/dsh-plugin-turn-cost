@@ -25,12 +25,14 @@
  * `tokens × rate = micro-yuan` exactly (¥1 = 1,000,000 micro-CNY).
  */
 
+import { cnyPriceFor } from './cny-prices.js';
+
 /** Projection key the client reads with `useProjection('turnCost')`. */
 export const PROJECTION_KEY = 'turnCost';
 
 /** Bump when the state/view shape changes; the projection cache is versioned. */
 /** Bumped when the projection state or its client-visible view changes shape. */
-export const COST_MODEL_VERSION = 6;
+export const COST_MODEL_VERSION = 11;
 
 /** Per-successful-request price of the Web Search / Fetch APIs, in micro-CNY. */
 export const SEARCH_REQUEST_MICRO = 5000;
@@ -86,6 +88,14 @@ export const PRICE_VERSION_USD = 'deepseek-usd-2026-11-11';
  * and every consumer marks it with a `≈`.
  */
 export const APPROX_CNY_PER_USD = 7.1;
+
+/**
+ * Domestic-vendor RMB prices come from `prices/cny-models.json` (loaded by the
+ * Host at startup and installed with `setCnyPriceBook`). Keeping them in a data
+ * file means a vendor price change only needs a JSON edit + restart, and the
+ * USD path stays untouched: USD amounts always come from the separate pi-ai
+ * USD catalog, never from converting RMB.
+ */
 
 /**
  * Bundled pi-ai provider catalog, installed by the Host half at startup.
@@ -189,24 +199,16 @@ function isDeepSeekProvider(provider) {
  * Providers that bill a subscription plan instead of per-token prices. Their
  * turns cannot be priced per request, so the client shows "本轮消耗订阅额度".
  *
- * Detection is offline and ordered: the pi-ai provider definitions the app
- * ships mark OAuth subscriptions with `isSubscription: true` (the loader puts
- * those ids in `priceBook.plans`); API-key plan providers (token-plan / coding
- * plans) are recognised by their id. A small built-in list covers the case where
- * no provider metadata directory is readable (headless builds, tests).
+ * There is deliberately no built-in list here. A provider id that merely looks
+ * like a plan (`…-coding`, `…-token-plan`) is not proof: the same provider id is
+ * commonly reached with a plain API key that is billed per token (for example
+ * Z.AI's coding endpoint). The Host classifies a provider as a plan only when
+ * the *stored credential* says so — an OAuth grant on a provider whose OAuth
+ * login is a subscription — or when the provider only offers a subscription
+ * OAuth route. `priceBook.plans` carries the latter (pi-ai
+ * `isSubscription: true` with no API-key route); the Host adds credential- and
+ * display-name-based ids before the projection replays any Session.
  */
-export const KNOWN_PLAN_PROVIDERS = [
-  'openai-codex',
-  'github-copilot',
-  'kimi-coding',
-  'zai-coding-cn',
-  'qwen-token-plan',
-  'qwen-token-plan-cn',
-  'xiaomi-token-plan',
-];
-
-const PLAN_PROVIDER_PATTERN = /(?:^|[-_])(?:token-plan|coding)(?:[-_]|$)/i;
-
 let planProviders = new Set();
 
 /**
@@ -234,9 +236,8 @@ function planProviderSet() {
 export function isPlanProvider(provider) {
   const id = String(provider || '').toLowerCase();
   if (id === '') return false;
-  if (planProviderSet().has(id)) return true;
-  if (KNOWN_PLAN_PROVIDERS.includes(id)) return true;
-  return PLAN_PROVIDER_PATTERN.test(id);
+  // Only an explicit classification counts; never the provider id's shape.
+  return planProviderSet().has(id);
 }
 
 /** Resolve one turn's price: which scheme applies and what it costs. */
@@ -268,6 +269,39 @@ export function resolvePricing(provider, model, tokens, peak) {
         usd: { hit: usdRate.hit * factor, miss: usdRate.miss * factor, output: usdRate.output * factor },
         flat: kind === 'legacy',
       },
+    };
+  }
+  // Domestic vendors (Zhipu GLM, Moonshot Kimi, Alibaba Qwen, ByteDance
+  // Doubao/Seed): when the local RMB file has this route, the official RMB list
+  // is charged for CNY while the pi-ai USD catalog is used for USD. They are
+  // separate published price lists, so neither amount is derived from the
+  // other (no ×7.1 conversion).
+  const vendorCny = cnyPriceFor(provider, model, tokens);
+  if (vendorCny !== undefined) {
+    const input = Number(tokens.uncachedInput) || 0;
+    const write = Number(tokens.cacheWrite) || 0;
+    const read = Number(tokens.cacheRead) || 0;
+    const output = Number(tokens.output) || 0;
+    const zero = vendorCny.input === 0 && vendorCny.output === 0 && vendorCny.cacheRead === 0;
+    if (zero) {
+      return { pricing: 'free', costMicro: 0, costUsdMicro: 0, approxCny: false, rates: { cny: vendorCny, usd: null, flat: true } };
+    }
+    const cny = Math.round(
+      input * vendorCny.input + write * vendorCny.cacheWrite + read * vendorCny.cacheRead + output * vendorCny.output,
+    );
+    const usdCatalog = catalogPriceFor(provider, model);
+    const usd =
+      usdCatalog === undefined
+        ? null
+        : Math.round(
+            input * usdCatalog.input + write * usdCatalog.cacheWrite + read * usdCatalog.cacheRead + output * usdCatalog.output,
+          );
+    return {
+      pricing: 'cny',
+      costMicro: cny,
+      costUsdMicro: usd,
+      approxCny: false,
+      rates: { cny: vendorCny, usd: usdCatalog === undefined ? null : usdCatalog, flat: true },
     };
   }
   const catalog = catalogPriceFor(provider, model);
@@ -308,7 +342,11 @@ export function classifyModel(model) {
 
 export function isPeak(time) {
   const raw = Number(time);
-  const stamp = raw > 0 ? (raw < 1e12 ? raw * 1000 : raw) : Date.now();
+  // A missing timestamp must never be priced by whatever time the page happens
+  // to be viewed: that would make a frozen turn change across restarts. `null`
+  // means "unknown", and callers bill the undiscounted list price.
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  const stamp = raw < 1e12 ? raw * 1000 : raw;
   const date = new Date(stamp + BEIJING_OFFSET_MS);
   const day = date.getUTCDay();
   const hour = date.getUTCHours() + date.getUTCMinutes() / 60;
@@ -421,7 +459,9 @@ export function usdMicroOfTurn(entry) {
   if (cny === null || cny === undefined) return null;
   const kind = classifyModel(entry.model);
   if (kind === undefined) return null;
-  const peak = entry.period !== undefined && entry.period !== null ? entry.period === 'peak' : entry.peak === true;
+  const peak =
+    entry.peak === true ||
+    (entry.period !== undefined && entry.period !== null && entry.period === 'peak');
   const tokenMicro = usdCostMicroOf(entry.tokens || {}, kind, peak) || 0;
   const billedSearch = Math.round((Number(entry.webSearchFeeMicro) || 0) / SEARCH_REQUEST_MICRO);
   const billedFetch = Math.round((Number(entry.webFetchFeeMicro) || 0) / FETCH_REQUEST_MICRO);
@@ -429,6 +469,18 @@ export function usdMicroOfTurn(entry) {
 }
 
 /** Fresh projection state for one Session. */
+/**
+ * Optional lookup into the plugin's own recorded per-step selections (the
+ * harness persists a request header only once per process, so the live
+ * `agent/pre-step` model selection is the only accurate per-turn source).
+ * Signature: (sessionId, turn, step) => { effort?: string, modelName?: string } | undefined.
+ */
+let selectionLookup = null;
+
+export function setSelectionLookup(fn) {
+  selectionLookup = typeof fn === 'function' ? fn : null;
+}
+
 export function createState(sessionId, inheritedEventCount = 0) {
   return {
     sessionId: String(sessionId || ''),
@@ -514,7 +566,18 @@ function finalizeTurn(state, open, endedAt) {
   }
   const turn = Number(open.turn) || 0;
   const hasUsage = tokens.total > 0;
-  const peak = isPeak(endedAt);
+  let recorded;
+  if (hasUsage && typeof selectionLookup === 'function') {
+    try {
+      recorded = selectionLookup(state.sessionId, turn, lastStepNumber);
+    } catch {
+      recorded = undefined;
+    }
+  }
+  const peakFlag = isPeak(endedAt);
+  // `null` (no end time) bills the list price; the period label stays flat so
+  // the UI does not claim a peak/off-peak window it cannot prove.
+  const peak = peakFlag === null ? true : peakFlag;
   // Provider-aware pricing: DeepSeek keeps its official peak/off-peak CNY + USD
   // tables; every other provider is priced from the bundled pi-ai catalog (USD
   // per 1M, no peak rule); models the catalog does not describe stay unknown and
@@ -528,7 +591,7 @@ function finalizeTurn(state, open, endedAt) {
     ? null
     : price.pricing !== 'deepseek'
       ? 'flat'
-      : classifyModel(model) === 'legacy'
+      : classifyModel(model) === 'legacy' || peakFlag === null
         ? 'flat'
         : peak
           ? 'peak'
@@ -570,7 +633,10 @@ function finalizeTurn(state, open, endedAt) {
     // the reasoning effort the provider request asked for.
     modelName: hasUsage && lastStep ? lastStep.modelName : undefined,
     effort: hasUsage
-      ? (lastStep && lastStep.effort) || (open.request && open.request.effort) || state.lastEffort
+      ? (recorded && recorded.effort) ||
+        (lastStep && lastStep.effort) ||
+        (open.request && open.request.effort) ||
+        state.lastEffort
       : undefined,
     // 'deepseek' | 'catalog' | 'free' | 'plan' | 'unknown' | 'empty'
     pricing: price.pricing,
@@ -806,8 +872,16 @@ export function viewOf(state) {
       costMicro: state.sessionCostMicro,
       costUsdMicro: state.sessionCostUsdMicro,
       turns: state.turns.length,
-      pricedTurns:
-        state.turns.length - state.missingTurns.length - state.sessionPlanTurns,
+      // Empty (aborted) turns and unpriced/plan turns are not "priced"; count
+      // the turns that really have a settled price instead of subtracting only
+      // missing/plan from the total.
+      pricedTurns: state.turns.filter(
+        (turn) =>
+          turn.empty !== true &&
+          turn.plan !== true &&
+          turn.costMicro !== null &&
+          turn.costMicro !== undefined,
+      ).length,
       freeTurns: state.sessionFreeTurns,
       planTurns: state.sessionPlanTurns,
       missingTurns: state.missingTurns,

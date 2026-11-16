@@ -1,0 +1,1098 @@
+{
+  "version": "2026-11-16",
+  "unit": "CNY per 1,000,000 tokens",
+  "sources": {
+    "zhipu": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+    "moonshot": "https://platform.kimi.com/docs/pricing/chat",
+    "qwen": "https://help.aliyun.com/zh/model-studio/model-pricing (中文「模型调用价格」，地域=华北2（北京），CNY)；缓存规则: https://help.aliyun.com/zh/model-studio/context-cache ；qwen4-max 缓存单价: https://help.aliyun.com/zh/model-studio/explicit-cache-qwen4",
+    "doubao": "https://www.volcengine.com/docs/82379/1099320 ; https://docs.volcengine.com/docs/ark/model-pricing?lang=zh ; https://docs.volcengine.com/docs/zh/ark/model-pricing.md ; https://docs.volcengine.com/docs/zh/ark/model-list.md"
+  },
+  "note": "Official RMB list prices used when the UI currency is CNY. USD amounts always come from the separate USD price list (pi-ai catalog). Edit this file when a vendor changes prices, then restart DSH to reload the Host half.",
+  "providers": [
+    {
+      "id": "zhipu",
+      "providerPattern": "^(zai|bigmodel|zhipu)",
+      "entries": [
+        {
+          "match": "^glm-5\\.3$",
+          "input": 8,
+          "output": 28,
+          "cacheRead": 2
+        },
+        {
+          "match": "^glm-5\\.3-flash$",
+          "input": 0.8,
+          "output": 2.8,
+          "cacheRead": 0.23
+        },
+        {
+          "match": "^glm-5\\.3-flashx$",
+          "input": 2,
+          "output": 7,
+          "cacheRead": 0.57
+        },
+        {
+          "match": "^glm-5\\.3-flashx-legal$",
+          "input": 2,
+          "output": 7,
+          "cacheRead": 0.57
+        },
+        {
+          "match": "^glm-5\\.2$",
+          "input": 8,
+          "output": 28,
+          "cacheRead": 2
+        },
+        {
+          "match": "^glm-5\\.1$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 6,
+                "output": 24,
+                "cacheRead": 1.3
+              }
+            },
+            {
+              "rates": {
+                "input": 8,
+                "output": 28,
+                "cacheRead": 2
+              }
+            }
+          ]
+        },
+        {
+          "match": "^glm-5-turbo$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 5,
+                "output": 22,
+                "cacheRead": 1.2
+              }
+            },
+            {
+              "rates": {
+                "input": 7,
+                "output": 26,
+                "cacheRead": 1.8
+              }
+            }
+          ]
+        },
+        {
+          "match": "^glm-5$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 4,
+                "output": 18,
+                "cacheRead": 1
+              }
+            },
+            {
+              "rates": {
+                "input": 6,
+                "output": 22,
+                "cacheRead": 1.5
+              }
+            }
+          ]
+        },
+        {
+          "match": "^glm-4\\.7$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "maxOutput": 200,
+              "rates": {
+                "input": 2,
+                "output": 8,
+                "cacheRead": 0.4
+              }
+            },
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 3,
+                "output": 14,
+                "cacheRead": 0.6
+              }
+            },
+            {
+              "rates": {
+                "input": 4,
+                "output": 16,
+                "cacheRead": 0.8
+              }
+            }
+          ]
+        },
+        {
+          "match": "^glm-4\\.7-flashx$",
+          "input": 0.5,
+          "output": 3,
+          "cacheRead": 0.1
+        },
+        {
+          "match": "^glm-4\\.7-flash$",
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-4\\.6v$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 1,
+                "output": 3,
+                "cacheRead": 0.2
+              }
+            },
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 2,
+                "output": 6,
+                "cacheRead": 0.4
+              }
+            }
+          ]
+        },
+        {
+          "match": "^glm-4\\.6v-flashx$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 0.15,
+                "output": 1.5,
+                "cacheRead": 0.03
+              }
+            },
+            {
+              "rates": {
+                "input": 0.3,
+                "output": 3,
+                "cacheRead": 0.03
+              }
+            }
+          ]
+        },
+        {
+          "match": "^glm-4\\.6v-flash$",
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-4\\.5-air$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "maxOutput": 200,
+              "rates": {
+                "input": 0.8,
+                "output": 2,
+                "cacheRead": 0.16
+              }
+            },
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 0.8,
+                "output": 6,
+                "cacheRead": 0.16
+              }
+            },
+            {
+              "rates": {
+                "input": 1.2,
+                "output": 8,
+                "cacheRead": 0.24
+              }
+            }
+          ]
+        },
+        {
+          "match": "^glm-4\\.5v$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 2,
+                "output": 6,
+                "cacheRead": 0.4
+              }
+            },
+            {
+              "maxInput": 65536,
+              "rates": {
+                "input": 4,
+                "output": 12,
+                "cacheRead": 0.8
+              }
+            }
+          ]
+        },
+        {
+          "match": "^glm-5v-turbo$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 5,
+                "output": 22,
+                "cacheRead": 1.2
+              }
+            },
+            {
+              "rates": {
+                "input": 7,
+                "output": 26,
+                "cacheRead": 1.8
+              }
+            }
+          ]
+        },
+        {
+          "match": "^glm-4-plus$",
+          "input": 5,
+          "output": 5,
+          "cacheRead": 2.5
+        },
+        {
+          "match": "^glm-4-air-250414$",
+          "input": 0.5,
+          "output": 0.5,
+          "cacheRead": 0.25
+        },
+        {
+          "match": "^glm-4-airx$",
+          "input": 10,
+          "output": 10,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-4-long$",
+          "input": 1,
+          "output": 1,
+          "cacheRead": 0.5
+        },
+        {
+          "match": "^glm-4-assistant$",
+          "input": 5,
+          "output": 5,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-z1-air$",
+          "input": 0.5,
+          "output": 0.5,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-z1-airx$",
+          "input": 5,
+          "output": 5,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-z1-flashx$",
+          "input": 0.1,
+          "output": 0.1,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-4-flashx-250414$",
+          "input": 0.1,
+          "output": 0.1,
+          "cacheRead": 0.05
+        },
+        {
+          "match": "^glm-4-flash-250414$",
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-z1-flash$",
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-4v-plus-0111$",
+          "input": 4,
+          "output": 4,
+          "cacheRead": 2
+        },
+        {
+          "match": "^glm-4v-flash$",
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-4\\.1v-thinking-flashx$",
+          "input": 2,
+          "output": 2,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-4\\.1v-thinking-flash$",
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0
+        },
+        {
+          "match": "^glm-ocr$",
+          "input": 0.2,
+          "output": 0.2,
+          "cacheRead": 0
+        }
+      ]
+    },
+    {
+      "id": "moonshot",
+      "providerPattern": "^(moonshot|kimi)",
+      "entries": [
+        {
+          "match": "^kimi-k3\\.1-pro$",
+          "input": 13,
+          "output": 68,
+          "cacheRead": 1.3,
+          "cacheWrite": 13,
+          "note": "cache write is ¥13/MTok for the default 5-minute TTL, ¥26/MTok for 1h; Batch API is 60% of these rates"
+        },
+        {
+          "match": "^kimi-k3\\.1-pro-highspeed$",
+          "input": 26,
+          "output": 136,
+          "cacheRead": 1.3,
+          "cacheWrite": 26,
+          "note": "high-speed variant; cache write ¥52/MTok for 1h"
+        },
+        {
+          "match": "^kimi-k3$",
+          "input": 20,
+          "output": 100,
+          "cacheRead": 2,
+          "cacheWrite": 20,
+          "note": "cache write ¥40/MTok for 1h"
+        },
+        {
+          "match": "^kimi-k2\\.7-code$",
+          "input": 6.5,
+          "output": 27,
+          "cacheRead": 1.3,
+          "note": "legacy model, retiring end of 2026"
+        },
+        {
+          "match": "^kimi-k2\\.7-code-highspeed$",
+          "input": 13,
+          "output": 54,
+          "cacheRead": 2.6,
+          "note": "legacy model, retiring end of 2026"
+        },
+        {
+          "match": "^kimi-k2\\.6$",
+          "input": 6.5,
+          "output": 27,
+          "cacheRead": 1.1,
+          "note": "legacy model, retiring end of 2026"
+        }
+      ]
+    },
+    {
+      "id": "qwen",
+      "providerPattern": "^(qwen|dashscope|alibaba|aliyun)",
+      "entries": [
+        {
+          "match": "^qwen4-max$",
+          "input": 10,
+          "output": 30,
+          "cacheRead": 0.5,
+          "note": "非思考与思考同价；缓存创建12.5元(5m)/20元(1h)，显式与隐式命中均0.5元；cacheWrite 取显式缓存创建 5 分钟档 ¥12.5/百万，1 小时档 ¥20/百万",
+          "cacheWrite": 12.5
+        },
+        {
+          "match": "^qwen3\\.8-max(-0902)?$",
+          "input": 12,
+          "output": 36,
+          "cacheRead": 0,
+          "note": "非思考与思考同价；官方称缓存命中价非输入×10%但未公布数字，故cacheRead=0"
+        },
+        {
+          "match": "^qwen3\\.7-max(-2026-05-20|-2026-06-08)?$",
+          "input": 12,
+          "output": 36,
+          "cacheRead": 2.4,
+          "note": "非思考与思考同价；cacheRead 按隐式(自动)缓存命中=输入×20%；显式缓存命中为输入×10%"
+        },
+        {
+          "match": "^qwen3\\.7-max-(preview|2026-05-17)$",
+          "input": 12,
+          "output": 36,
+          "cacheRead": 0,
+          "note": "仅思考模式；未列入缓存支持清单，cacheRead=0"
+        },
+        {
+          "match": "^qwen-max$",
+          "input": 2.4,
+          "output": 9.6,
+          "cacheRead": 0.48,
+          "note": "无阶梯计价，仅非思考模式；仅隐式缓存(命中=输入×20%)"
+        },
+        {
+          "match": "^qwen3\\.7-plus(-2026-05-26)?$",
+          "tiers": [
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 2,
+                "output": 8,
+                "cacheRead": 0.4
+              }
+            },
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 6,
+                "output": 24,
+                "cacheRead": 1.2
+              }
+            }
+          ],
+          "note": "非思考与思考同价；表中为原价，限时8折(实付1.6/6.4与4.8/19.2)；cacheRead 按隐式(自动)缓存命中=输入×20%；显式缓存命中为输入×10%"
+        },
+        {
+          "match": "^qwen3\\.6-plus(-2026-04-02)?$",
+          "tiers": [
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 2,
+                "output": 12,
+                "cacheRead": 0.2
+              }
+            },
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 8,
+                "output": 48,
+                "cacheRead": 0.8
+              }
+            }
+          ],
+          "note": "非思考与思考同价；仅支持显式缓存(命中=输入×10%)，无隐式缓存"
+        },
+        {
+          "match": "^qwen3\\.5-plus(-2026-02-15|-2026-04-20)?$",
+          "tiers": [
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 0.8,
+                "output": 4.8,
+                "cacheRead": 0.08
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 2,
+                "output": 12,
+                "cacheRead": 0.2
+              }
+            },
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 4,
+                "output": 24,
+                "cacheRead": 0.4
+              }
+            }
+          ],
+          "note": "非思考与思考同价；仅支持显式缓存(命中=输入×10%)，无隐式缓存"
+        },
+        {
+          "match": "^qwen-plus(-latest|-2025-12-01)?$",
+          "tiers": [
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 0.8,
+                "output": 2,
+                "cacheRead": 0.16
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 2.4,
+                "output": 20,
+                "cacheRead": 0.48
+              }
+            },
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 4.8,
+                "output": 48,
+                "cacheRead": 0.96
+              }
+            }
+          ],
+          "note": "output 为非思考价；思考模式输出为 8/24/64 元(同档)；cacheRead 按隐式(自动)缓存命中=输入×20%；显式缓存命中为输入×10%"
+        },
+        {
+          "match": "^qwen-plus-20(24-12-20|25-01-12|25-01-25|25-04-28|25-07-14)$",
+          "input": 0.8,
+          "output": 2,
+          "cacheRead": 0,
+          "note": "无阶梯计价；思考模式输出8元；早期快照未列入缓存支持清单，cacheRead=0"
+        },
+        {
+          "match": "^qwen3\\.8-flash$",
+          "input": 0.8,
+          "output": 2.7,
+          "cacheRead": 0,
+          "note": "非思考与思考同价；官方称缓存创建/命中价均非通用比例(且按地域不同)但未公布，cacheRead=0"
+        },
+        {
+          "match": "^qwen3\\.7-flash(-2026-07-15)?$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 0.2,
+                "output": 0.8,
+                "cacheRead": 0.04
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 0.6,
+                "output": 2.4,
+                "cacheRead": 0.12
+              }
+            },
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 1.2,
+                "output": 4.8,
+                "cacheRead": 0.24
+              }
+            }
+          ],
+          "note": "非思考与思考同价；cacheRead 按隐式(自动)缓存命中=输入×20%；显式缓存命中为输入×10%"
+        },
+        {
+          "match": "^qwen3\\.6-flash(-2026-04-16)?$",
+          "tiers": [
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 1.2,
+                "output": 7.2,
+                "cacheRead": 0.12
+              }
+            },
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 4.8,
+                "output": 28.8,
+                "cacheRead": 0.48
+              }
+            }
+          ],
+          "note": "非思考与思考同价；仅支持显式缓存(命中=输入×10%)，无隐式缓存"
+        },
+        {
+          "match": "^qwen3\\.5-flash(-2026-02-23)?$",
+          "tiers": [
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 0.2,
+                "output": 2,
+                "cacheRead": 0.02
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 0.8,
+                "output": 8,
+                "cacheRead": 0.08
+              }
+            },
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 1.2,
+                "output": 12,
+                "cacheRead": 0.12
+              }
+            }
+          ],
+          "note": "非思考与思考同价；仅支持显式缓存(命中=输入×10%)，无隐式缓存"
+        },
+        {
+          "match": "^qwen-flash(-2025-07-28)?$",
+          "tiers": [
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 0.15,
+                "output": 1.5,
+                "cacheRead": 0.03
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 0.6,
+                "output": 6,
+                "cacheRead": 0.12
+              }
+            },
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 1.2,
+                "output": 12,
+                "cacheRead": 0.24
+              }
+            }
+          ],
+          "note": "非思考与思考同价；cacheRead 按隐式(自动)缓存命中=输入×20%；显式缓存命中为输入×10%"
+        },
+        {
+          "match": "^qwen-long$",
+          "input": 0.5,
+          "output": 2,
+          "cacheRead": 0,
+          "note": "无阶梯计价；官方缓存支持清单未含此模型，cacheRead=0"
+        },
+        {
+          "match": "^qwen3-coder-flash(-2025-07-28)?$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 1,
+                "output": 4,
+                "cacheRead": 0.2
+              }
+            },
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 1.5,
+                "output": 6,
+                "cacheRead": 0.3
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 2.5,
+                "output": 10,
+                "cacheRead": 0.5
+              }
+            },
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 5,
+                "output": 25,
+                "cacheRead": 1
+              }
+            }
+          ],
+          "note": "cacheRead 按隐式(自动)缓存命中=输入×20%；显式缓存命中为输入×10%"
+        },
+        {
+          "match": "^qwen3-vl-plus$",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 1,
+                "output": 10,
+                "cacheRead": 0.2
+              }
+            },
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 1.5,
+                "output": 15,
+                "cacheRead": 0.3
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 3,
+                "output": 30,
+                "cacheRead": 0.6
+              }
+            }
+          ],
+          "note": "非思考与思考同价；cacheRead 按隐式(自动)缓存命中=输入×20%；显式缓存命中为输入×10%"
+        },
+        {
+          "match": "^qwen3\\.5-ocr$",
+          "input": 0.5,
+          "output": 2,
+          "cacheRead": 0,
+          "note": "按 token 计价的 OCR 模型；官方缓存支持清单未含此模型，cacheRead=0"
+        },
+        {
+          "match": "^qwen-vl-ocr(-2025-11-20)?$",
+          "input": 0.3,
+          "output": 0.5,
+          "cacheRead": 0,
+          "note": "旧版 qwen-vl-ocr-2024-10-28 为 5/5 元；官方缓存支持清单未含此模型，cacheRead=0"
+        },
+        {
+          "match": "^qwen3\\.8-2\\.4t-a95b$",
+          "input": 12,
+          "output": 36,
+          "cacheRead": 0,
+          "note": "开源版；非思考与思考同价；官方称命中价非输入×10%但未公布，cacheRead=0"
+        },
+        {
+          "match": "^qwen3\\.8-27b$",
+          "input": 3,
+          "output": 12,
+          "cacheRead": 0.6,
+          "note": "开源版；非思考与思考同价；cacheRead 按隐式(自动)缓存命中=输入×20%；显式缓存命中为输入×10%"
+        },
+        {
+          "match": "^qwen3\\.6-35b-a3b$",
+          "input": 1.8,
+          "output": 10.8,
+          "cacheRead": 0,
+          "note": "开源版；非思考与思考同价；官方缓存支持清单未含此模型，cacheRead=0"
+        },
+        {
+          "match": "^qwen3\\.6-27b$",
+          "input": 3,
+          "output": 18,
+          "cacheRead": 0,
+          "note": "开源版；非思考与思考同价；官方缓存支持清单未含此模型，cacheRead=0"
+        },
+        {
+          "match": "^qwen3\\.5-397b-a17b$",
+          "tiers": [
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 1.2,
+                "output": 7.2,
+                "cacheRead": 0
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 3,
+                "output": 18,
+                "cacheRead": 0
+              }
+            }
+          ],
+          "note": "开源版；非思考与思考同价；官方缓存支持清单未含此模型，cacheRead=0"
+        },
+        {
+          "match": "^qwen3\\.5-122b-a10b$",
+          "tiers": [
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 0.8,
+                "output": 6.4,
+                "cacheRead": 0
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 2,
+                "output": 16,
+                "cacheRead": 0
+              }
+            }
+          ],
+          "note": "开源版；非思考与思考同价；官方缓存支持清单未含此模型，cacheRead=0"
+        },
+        {
+          "match": "^qwen3\\.5-27b$",
+          "tiers": [
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 0.6,
+                "output": 4.8,
+                "cacheRead": 0
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 1.8,
+                "output": 14.4,
+                "cacheRead": 0
+              }
+            }
+          ],
+          "note": "开源版；非思考与思考同价；官方缓存支持清单未含此模型，cacheRead=0"
+        },
+        {
+          "match": "^qwen3\\.5-35b-a3b$",
+          "tiers": [
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 0.4,
+                "output": 3.2,
+                "cacheRead": 0
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 1.6,
+                "output": 12.8,
+                "cacheRead": 0
+              }
+            }
+          ],
+          "note": "开源版；非思考与思考同价；官方缓存支持清单未含此模型，cacheRead=0"
+        }
+      ]
+    },
+    {
+      "id": "doubao",
+      "providerPattern": "^(doubao|volcengine|ark|seed|bytedance)",
+      "entries": [
+        {
+          "match": "^doubao[-_.]seed[-_.]2[.\\-]1[-_.]pro($|[-_.])",
+          "tiers": [
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 6.0,
+                "output": 30.0,
+                "cacheRead": 1.2
+              }
+            }
+          ]
+        },
+        {
+          "match": "^doubao[-_.]seed[-_.]2[.\\-]1[-_.]lite($|[-_.])",
+          "tiers": [
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 0.8,
+                "output": 2.7,
+                "cacheRead": 0.16
+              }
+            }
+          ]
+        },
+        {
+          "match": "^doubao[-_.]seed[-_.]2[.\\-]1[-_.]turbo($|[-_.])",
+          "tiers": [
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 3.0,
+                "output": 15.0,
+                "cacheRead": 0.6
+              }
+            }
+          ]
+        },
+        {
+          "match": "^doubao[-_.]seed[-_.]evolving($|[-_.])",
+          "tiers": [
+            {
+              "maxInput": 1048576,
+              "rates": {
+                "input": 6.0,
+                "output": 30.0,
+                "cacheRead": 1.2
+              }
+            }
+          ]
+        },
+        {
+          "match": "^doubao[-_.]seed[-_.]2[.\\-]0[-_.]pro($|[-_.])",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 3.2,
+                "output": 16.0,
+                "cacheRead": 0.64
+              }
+            },
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 4.8,
+                "output": 24.0,
+                "cacheRead": 0.96
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 9.6,
+                "output": 48.0,
+                "cacheRead": 1.92
+              }
+            }
+          ]
+        },
+        {
+          "match": "^doubao[-_.]seed[-_.]2[.\\-]0[-_.]lite($|[-_.])",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 0.6,
+                "output": 3.6,
+                "cacheRead": 0.12
+              }
+            },
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 0.9,
+                "output": 5.4,
+                "cacheRead": 0.18
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 1.8,
+                "output": 10.8,
+                "cacheRead": 0.36
+              }
+            }
+          ]
+        },
+        {
+          "match": "^doubao[-_.]seed[-_.]2[.\\-]0[-_.]mini($|[-_.])",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 0.2,
+                "output": 2.0,
+                "cacheRead": 0.04
+              }
+            },
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 0.4,
+                "output": 4.0,
+                "cacheRead": 0.08
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 0.8,
+                "output": 8.0,
+                "cacheRead": 0.16
+              }
+            }
+          ]
+        },
+        {
+          "match": "^doubao[-_.]seed[-_.]2[.\\-]0[-_.]code($|[-_.])",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 3.2,
+                "output": 16.0,
+                "cacheRead": 0.64
+              }
+            },
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 4.8,
+                "output": 24.0,
+                "cacheRead": 0.96
+              }
+            },
+            {
+              "maxInput": 262144,
+              "rates": {
+                "input": 9.6,
+                "output": 48.0,
+                "cacheRead": 1.92
+              }
+            }
+          ]
+        },
+        {
+          "match": "^doubao[-_.]seed[-_.]character($|[-_.])",
+          "tiers": [
+            {
+              "maxInput": 32768,
+              "rates": {
+                "input": 0.8,
+                "output": 2.0,
+                "cacheRead": 0.16
+              }
+            },
+            {
+              "maxInput": 131072,
+              "rates": {
+                "input": 1.2,
+                "output": 6.0,
+                "cacheRead": 0.16
+              }
+            }
+          ]
+        },
+        {
+          "match": "^doubao[-_.]seed[-_.]translation($|[-_.])",
+          "tiers": [
+            {
+              "rates": {
+                "input": 1.2,
+                "output": 3.6,
+                "cacheRead": 0.0
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

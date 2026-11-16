@@ -179,8 +179,8 @@ window.__ModuleLoader__.load({
     const DICTIONARIES = {
       zh: {
         badge: '本轮 {amount}',
-        peakTag: '(峰)',
-        offPeakTag: '(谷)',
+        peakTag: '（峰）',
+        offPeakTag: '（谷）',
         session: '会话 {amount}',
         sessionPartial: '会话 ≥ {amount}',
         panelTitleTurn: '本轮费用明细',
@@ -213,6 +213,8 @@ window.__ModuleLoader__.load({
         tipFreeNote: '该模型在 DSH 内置价格目录中的输入/输出价格均为 0，因此本轮计费为 {amount}。',
         tipCatalogNote:
           '该模型不在 DeepSeek 价目内，价格取自 DSH 内置的 pi-ai 模型目录（美元 / 百万 tokens）；人民币金额按 1 美元 ≈ ¥{rate} 近似折算，标有 ≈。',
+        tipCnyNote:
+          '人民币金额按对应厂商的官方人民币价目（元 / 百万 tokens）计算；美元金额按官方美元价目计算，两者是各自的价格表，不做汇率折算。',
         tipSessionFree: '其中免费轮次：{count} 轮',
         tipTokenSection: 'Token 统计',
         tipTokens: '本轮 tokens：{tokens}',
@@ -376,6 +378,8 @@ window.__ModuleLoader__.load({
         tipFreeNote: 'Every rate for this model is 0 in the bundled price catalog, so this turn costs {amount}.',
         tipCatalogNote:
           'This model is not in the DeepSeek price list; its price comes from the pi-ai catalog bundled with DSH (USD per 1M tokens). CNY amounts are approximated at 1 USD ≈ ¥{rate} and marked with ≈.',
+        tipCnyNote:
+          'CNY amounts use the vendor’s official RMB list, and USD amounts use the official USD list; the two lists are published separately and are never converted into each other.',
         tipSessionFree: 'Free turns: {count}',
         tipTokenSection: 'Token usage',
         tipTokens: 'Turn tokens: {tokens}',
@@ -517,7 +521,8 @@ window.__ModuleLoader__.load({
 
     function isPeak(time) {
       const raw = Number(time);
-      const stamp = raw > 0 ? (raw < 1e12 ? raw * 1000 : raw) : Date.now();
+      if (!Number.isFinite(raw) || raw <= 0) return null;
+      const stamp = raw < 1e12 ? raw * 1000 : raw;
       const date = new Date(stamp + BEIJING_OFFSET_MS);
       const day = date.getUTCDay();
       const hour = date.getUTCHours() + date.getUTCMinutes() / 60;
@@ -616,7 +621,13 @@ window.__ModuleLoader__.load({
       if (entry.pricing === 'free') return 'free';
       if (entry.pricing === 'plan') return 'plan';
       if (entry.pricing === 'unknown') return 'unknown';
-      if (entry.pricing === 'deepseek' || entry.pricing === 'catalog') return 'priced';
+      if (
+        entry.pricing === 'deepseek' ||
+        entry.pricing === 'catalog' ||
+        entry.pricing === 'cny' ||
+        entry.pricing === 'glm'
+      )
+        return 'priced';
       if (entry.costMicro === null || entry.costMicro === undefined) return 'unknown';
       return 'priced';
     }
@@ -643,10 +654,13 @@ window.__ModuleLoader__.load({
     function estimate(usage, model, time, currency) {
       const kind = classifyModel(model);
       if (kind === undefined) return undefined;
-      const peak = isPeak(time);
-      const price = priceRate(kind, peak, currency);
+      const peakFlag = isPeak(time);
+      // Unknown time bills the list price, never the wall clock; keep `peak`
+      // null so the dialog can label the period as flat/unknown.
+      const billedPeak = peakFlag === null ? true : peakFlag;
+      const price = priceRate(kind, billedPeak, currency);
       const buckets = bucketsOf(usage);
-      return { kind, peak, price, ...buckets, total: costOf(buckets, price) };
+      return { kind, peak: peakFlag, price, ...buckets, total: costOf(buckets, price) };
     }
 
     /**
@@ -713,8 +727,22 @@ window.__ModuleLoader__.load({
       }
       // Records written before 1.1.0 only carry the CNY amount; USD values are
       // re-priced from the same token buckets with the official US$ table.
+      if (entry.pricing === 'cny' || entry.pricing === 'glm') {
+        // Official RMB records carry their own CNY and USD amounts; when the
+        // USD list is missing there is nothing to fall back to. Dividing the
+        // official RMB amount by 7.1 would invent a rate, so leave it unknown.
+        return null;
+      }
       const kind = classifyModel(entry.model);
-      if (kind === undefined) return null;
+      if (kind === undefined) {
+        // A record written before the catalog fields existed only has the CNY
+        // amount. The catalog price is exactly `USD × 7.10`, so the reverse
+        // conversion is the same approximation the CNY label already shows.
+        if (Number.isFinite(Number(entry.costMicro))) {
+          return Math.round(Number(entry.costMicro) / APPROX_CNY_PER_USD);
+        }
+        return null;
+      }
       const period = entry.period !== undefined && entry.period !== null ? entry.period : undefined;
       const peak = period !== undefined ? period === 'peak' : entry.peak === true;
       const tokens = entry.tokens || {};
@@ -902,6 +930,7 @@ window.__ModuleLoader__.load({
       if (info.status === 'unknown') lines.push(t('tipUnknownNote', { amount: `${symbolFor()}??` }));
       if (info.status === 'plan') lines.push(t('tipPlanNote', {}));
       if (info.status === 'free') lines.push(t('tipFreeNote', { amount: `${symbolFor()}0` }));
+      if (info.pricing === 'cny' || info.pricing === 'glm') lines.push(t('tipCnyNote', {}));
       if (info.status === 'priced' && info.approx) lines.push(t('tipCatalogNote', { rate: String(APPROX_CNY_PER_USD) }));
       if (info.pricing === 'deepseek') {
         lines.push(
@@ -1016,17 +1045,28 @@ window.__ModuleLoader__.load({
       return ` ${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
     }
 
-    /** Footer label: catalog model name plus the turn's reasoning effort. */
-    function modelLabelOf(entry) {
+    /** Model display name and reasoning effort, preferring the local record. */
+    function modelPartsOf(entry, stored) {
       if (!entry || typeof entry !== 'object') return undefined;
-      const name =
+      const storedName = stored && typeof stored.modelName === 'string' && stored.modelName.length > 0 ? stored.modelName : undefined;
+      const storedEffort = stored && typeof stored.effort === 'string' && stored.effort.length > 0 ? stored.effort : undefined;
+      const entryName =
         typeof entry.modelName === 'string' && entry.modelName.length > 0
           ? entry.modelName
           : typeof entry.model === 'string' && entry.model.length > 0
             ? entry.model
             : undefined;
+      const name = entryName || storedName;
       if (name === undefined) return undefined;
-      return `${name}${effortSuffix(entry.effort)}`;
+      const effort = (typeof entry.effort === 'string' && entry.effort.length > 0 ? entry.effort : undefined) || storedEffort;
+      return { name, effort: effortSuffix(effort) };
+    }
+
+    /** Combined label used by the amount dialog. */
+    function modelLabelOf(entry, stored) {
+      const parts = modelPartsOf(entry, stored);
+      if (parts === undefined) return undefined;
+      return `${parts.name}${parts.effort}`;
     }
 
     function translate(t, key, params) {
@@ -1132,30 +1172,6 @@ window.__ModuleLoader__.load({
       lineHeight: 1.5,
       whiteSpace: 'pre-wrap',
     };
-
-    /** The small round currency glyph in a panel title (mirrors the usage dialog). */
-    function costPanelIcon() {
-      return h(
-        'svg',
-        {
-          width: 14,
-          height: 14,
-          viewBox: '0 0 24 24',
-          fill: 'none',
-          'aria-hidden': 'true',
-          style: { flex: 'none', color: 'var(--dsw-alias-label-tertiary)' },
-        },
-        h('circle', { cx: 12, cy: 12, r: 9, stroke: 'currentColor', strokeWidth: 1.5 }),
-        h('path', {
-          d: 'M8.5 8.5 12 12.5l3.5-4M12 12.5V17M9.5 12.5h5M9.5 15h5',
-          stroke: 'currentColor',
-          strokeWidth: 1.3,
-          strokeLinecap: 'round',
-          strokeLinejoin: 'round',
-        }),
-      );
-    }
-
 
     /** Rough height of a dialog body so the side with more room can be chosen. */
     function estimatePanelHeight(lines, viewportHeight) {
@@ -1407,23 +1423,29 @@ window.__ModuleLoader__.load({
         return { v: STORE_VERSION, sessions: {} };
       }
 
+      // Fallback for quota/private-mode failures: the last record we serialized
+      // stays readable in memory instead of silently disappearing.
+      let memory = blank();
+
       function read() {
         try {
           const raw = storage.getItem(key);
           const parsed = raw === null ? undefined : JSON.parse(raw);
-          if (!parsed || typeof parsed !== 'object' || parsed.v !== STORE_VERSION) return blank();
-          if (!parsed.sessions || typeof parsed.sessions !== 'object') return blank();
+          if (!parsed || typeof parsed !== 'object' || parsed.v !== STORE_VERSION) return memory;
+          if (!parsed.sessions || typeof parsed.sessions !== 'object') return memory;
+          memory = parsed;
           return parsed;
         } catch {
-          return blank();
+          return memory;
         }
       }
 
       function write(data) {
+        memory = data;
         try {
           storage.setItem(key, JSON.stringify(data));
         } catch {
-          /* quota or private mode: keep the in-memory copy */
+          /* quota or private mode: the in-memory copy above keeps it readable */
         }
         for (const listener of Array.from(listeners)) {
           try {
@@ -1446,14 +1468,30 @@ window.__ModuleLoader__.load({
         for (const entry of Array.isArray(view.turns) ? view.turns : []) {
           if (!entry || typeof entry.id !== 'string') continue;
           const costMicro = entry.costMicro === null || entry.costMicro === undefined ? null : Number(entry.costMicro) || 0;
+          const previousTurn =
+            data.sessions[view.sessionId] &&
+            data.sessions[view.sessionId].turns &&
+            data.sessions[view.sessionId].turns[entry.id];
           turns[entry.id] = {
             id: entry.id,
             turn: Number(entry.turn) || 0,
             startedAt: Number(entry.startedAt) || 0,
             endedAt: Number(entry.endedAt) || 0,
             model: typeof entry.model === 'string' ? entry.model : null,
-            modelName: typeof entry.modelName === 'string' ? entry.modelName : null,
-            effort: typeof entry.effort === 'string' ? entry.effort : null,
+            // The local record wins: once a turn's model and reasoning effort
+            // were stored, later recomputations must not rewrite history.
+            modelName:
+              typeof entry.modelName === 'string' && entry.modelName.length > 0
+                ? entry.modelName
+                : previousTurn && typeof previousTurn.modelName === 'string' && previousTurn.modelName.length > 0
+                  ? previousTurn.modelName
+                  : null,
+            effort:
+              typeof entry.effort === 'string' && entry.effort.length > 0
+                ? entry.effort
+                : previousTurn && typeof previousTurn.effort === 'string' && previousTurn.effort.length > 0
+                  ? previousTurn.effort
+                  : null,
             provider: typeof entry.provider === 'string' ? entry.provider : null,
             pricing: typeof entry.pricing === 'string' ? entry.pricing : null,
             plan: entry.plan === true,
@@ -1613,6 +1651,9 @@ window.__ModuleLoader__.load({
       const amounts = [];
       for (const entry of list) {
         if (entry.empty === true) continue;
+        // Count tokens before the plan/missing branches: a subscription turn
+        // still consumed tokens, and the session sum must include them.
+        sessionTokens += Number(entry.tokens && entry.tokens.total) || 0;
         const status = statusOf(entry);
         if (status === 'plan') {
           plan += 1;
@@ -1629,12 +1670,15 @@ window.__ModuleLoader__.load({
         sum += shownValue(costMicro / 1e6, currency);
         webFee += webFeeOf(entry, currency);
         priced += 1;
-        sessionTokens += Number(entry.tokens && entry.tokens.total) || 0;
         amounts.push({ turn: Number(entry.turn), text: entryAmountText(entry, currency, t) });
       }
 
       return {
         own,
+        storedOwn:
+          storedRecord && storedRecord.turns && own && typeof own.id === 'string'
+            ? storedRecord.turns[own.id]
+            : undefined,
         turnText: entryAmountText(own, currency, t),
         ownMicro: statusOf(own) === 'plan' ? null : entryCostMicro(own, currency, storedRecord),
         session: {
@@ -1714,7 +1758,7 @@ window.__ModuleLoader__.load({
         totalTokens: Number(tokens.total) || detail.hit + detail.miss + detail.write + detail.output,
       };
       const info = {
-        model: modelLabelOf(own) || own.model || FALLBACK_MODEL,
+        model: modelLabelOf(own, row.storedOwn) || own.model || FALLBACK_MODEL,
         provider: own.provider || '',
         assumed: !own.model,
         mixed: false,
@@ -1864,7 +1908,11 @@ window.__ModuleLoader__.load({
         tagPeriod = undefined;
         if (info && info.detail) {
           tagPeriod =
-            info.detail.kind === 'legacy' ? 'flat' : info.detail.peak === true ? 'peak' : 'offpeak';
+            info.detail.kind === 'legacy' || info.detail.peak === null
+              ? 'flat'
+              : info.detail.peak === true
+                ? 'peak'
+                : 'offpeak';
           turnLines = describeTokens(info.detail, usage, info, t);
           turnFootLines = describeTurnFoot(info, t);
           turnDetail = info.detail;
@@ -1893,14 +1941,14 @@ window.__ModuleLoader__.load({
       const sessionPanelLines = session === undefined ? [] : sessionLines;
       const tag = periodTag(t, tagPeriod);
       const ownStatus = row !== undefined ? statusOf(row.own) : 'priced';
+      // The peak/off-peak marker belongs to the model label now; the turn
+      // button keeps the plain amount.
       const turnLabel =
         turnText === undefined
           ? undefined
           : ownStatus === 'plan'
             ? t('planTurn')
-            : tag === '' || tag === undefined
-              ? t('badge', { amount: turnText })
-              : `${tag} ${t('badge', { amount: turnText })}`;
+            : t('badge', { amount: turnText });
       const sessionAmountText =
         session === undefined
           ? ''
@@ -1908,7 +1956,7 @@ window.__ModuleLoader__.load({
             ? session.amountText
             : `${session.approx ? '≈' : ''}${money(session.sum)}`;
 
-      const modelText = row !== undefined ? modelLabelOf(row.own) : undefined;
+      const modelParts = row !== undefined ? modelPartsOf(row.own, row.storedOwn) : undefined;
 
       const sessionLabel =
         session === undefined
@@ -2019,7 +2067,7 @@ window.__ModuleLoader__.load({
               gap: 0,
             },
           },
-          modelText !== undefined
+          modelParts !== undefined
             ? h(
                 'span',
                 {
@@ -2027,7 +2075,25 @@ window.__ModuleLoader__.load({
                   'data-dsh-turn-model': 'true',
                   style: { ...MUTED, paddingRight: 12 },
                 },
-                modelText,
+                h(
+                  'span',
+                  { 'data-dsh-turn-model-name': 'true', style: { color: 'var(--dsw-alias-label-secondary)' } },
+                  modelParts.name,
+                ),
+                modelParts.effort !== ''
+                  ? h(
+                      'span',
+                      { 'data-dsh-turn-effort': 'true', style: { color: 'var(--dsw-alias-label-tertiary)' } },
+                      modelParts.effort,
+                    )
+                  : null,
+                tag !== undefined && tag !== ''
+                  ? h(
+                      'span',
+                      { 'data-dsh-turn-period': 'true', style: { color: 'var(--dsw-alias-label-tertiary)' } },
+                      ` ${tag}`,
+                    )
+                  : null,
               )
             : null,
           hasTurn ? trigger('turn', { 'data-dsh-turn-cost': String(ownTurn) }, turnLabel) : null,

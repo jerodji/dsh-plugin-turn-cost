@@ -6,7 +6,7 @@ Show what each conversation turn and the whole session cost, right under the tok
 
 ```
 Usage 19.2k
-(off-peak) This turn $0.027    Session $0.151
+DeepSeek-V4.1-Flash High (off-peak)  This turn $0.027    Session $0.151
 ```
 
 ## Screenshots
@@ -50,7 +50,7 @@ In short: **it turns "how much did these tokens cost?" from invisible and hard t
 
 - **This turn / session cost** — the estimated cost of the turn and the cumulative session cost up to that turn. Earlier turns never change when new turns arrive.
 - **Detail popovers** — "This turn" shows token usage, billing period, per-bucket unit prices and amounts; "Session" shows cumulative tokens, stats range and the Session ID.
-- **Peak / off-peak tag** — `(peak)` / `(off-peak)` follows the turn's own end time (off-peak is 50% off). Retired models with flat pricing get no tag.
+- **Peak / off-peak tag** — `(peak)` / `(off-peak)` follows the model label (after the reasoning effort) and is judged by the turn's own end time (off-peak is 50% off); the "This turn" button shows the amount only. Retired models with flat pricing get no tag.
 - **Budget reminder** — a persistent "$ Budget N" pill in the composer tool row (left of the model selector; only the currency symbol when the composer is narrow), usable in a new conversation or mid-conversation. When the session total reaches the budget the label turns orange, as a warning that never interrupts the conversation.
 - **Balance reminder** — set separate CNY and USD thresholds under Settings; you are notified once when the balance drops below the threshold, with "Remind me later" (silent for the rest of the day) and "Don't remind again" (silent until the balance recovers and dips again).
 - **Session billing statistics** — a dedicated settings page listing every session's cost, grouped by workspace directory / workspace tree / flat list, sortable by name or time, filtered by today / 7 days / 1 / 3 / 6 months / 1 year.
@@ -71,10 +71,11 @@ In short: **it turns "how much did these tokens cost?" from invisible and hard t
 
 - **DeepSeek models**: estimates based on DeepSeek's official price lists; CNY and USD each use their own official table, **never an FX conversion**.
 - **Third-party models** (other providers you connect): priced from the **offline model catalog bundled with DSH** (pi-ai, USD per 1M tokens) — no network needed, available at startup. In CNY mode the amount is approximated at 1 USD ≈ ¥7.10 and marked with `≈`.
+- **Chinese vendors (Zhipu GLM, Kimi, Qwen, Doubao / Seed)**: CNY mode uses each vendor's **official RMB list** (yuan per 1M tokens) and is exact (no `≈`); USD mode uses the bundled USD list. The two lists are independent and never converted — GLM-5.3 costs ¥8 / ¥28 on the RMB list, not the catalog USD price × 7.1. The RMB prices live in the plugin's local `prices/cny-models.json`, so a vendor price change is just an edit to that file plus a DSH restart; models missing from it still fall back to the catalog USD price marked with `≈`. DeepSeek keeps its built-in official CNY / USD tables and peak/off-peak rules.
 - Models whose catalog rates are all 0 show `¥0` (`$0` in USD mode); models absent from the catalog show `¥??` (`$??`) and are excluded from the session total, so a session with priced turns becomes a `≥` lower bound.
-- Subscription plans (ChatGPT Pro, GitHub Copilot, GLM / Kimi Coding, Token Plan) have no per-token price: the turn shows "This turn consumed subscription quota" and is excluded from money totals. A plan-only session shows "Session consumed subscription quota"; with priced turns it shows `Session ≥ ¥12` / `≥ $12`.
-- `(peak)` / `(off-peak)` appears only for models billed by DeepSeek's peak/off-peak table; plan, free, unknown and other third-party models carry no tag.
-- Each footer shows the model and reasoning effort used for that turn (e.g. `DeepSeek-V4.1-Flash High`). The model name matches the picker (host llm catalog first, bundled catalog name as fallback); the effort comes from the request header, and since the log records that header only once per process start, later turns carry forward the last known effort. Replayed historical turns get the label too.
+- Subscription plans (monthly / quarterly / yearly plans such as ChatGPT Pro, GitHub Copilot, Claude Pro/Max, GLM / Kimi Coding, Token Plan) have no per-token price: the turn shows "This turn consumed subscription quota" and is excluded from money totals. A plan-only session shows "Session consumed subscription quota"; with priced turns it shows `Session ≥ ¥12` / `≥ $12`. Metered API routes are not plans — including OAuth sign-ins to a per-token gateway (OpenRouter) and plain API keys — so they are priced from that model's catalog rate × tokens and saved to the projection and the browser's local record. A provider id containing `coding` / `token-plan` is not proof of a plan either: if the stored credential is an API key (for example GLM's coding endpoint), the turn is priced per token.
+- `(peak)` / `(off-peak)` appears only for models billed by DeepSeek's peak/off-peak table, appended to the model name and reasoning effort (e.g. `DeepSeek-V4.1-Flash High (off-peak)`); the "This turn" button keeps the plain amount; plan, free, unknown and other third-party models carry no tag.
+- Each footer shows the model and reasoning effort used for that turn (e.g. `DeepSeek-V4.1-Flash High`). The model name matches the picker (host llm catalog first, bundled catalog name as fallback); the effort is recorded per turn from the host `agent/pre-step` model selection into `~/.dsh/turn-cost-selections.json`, so it stays accurate after restarts; the model name is shown in normal grey and the effort in a lighter grey.
 - Peak hours are weekdays 09:00–12:00 and 14:00–18:00 Beijing time; everything else is off-peak at 50% off, judged by **each turn's own end time** (DeepSeek only; catalog prices are flat all day).
 - Web search / fetch is billed per successful request (¥5 or $0.75 per 1,000), only for the new Search/Fetch API and only for DeepSeek models.
 - Statutory holidays are not excluded, and turns spanning peak/off-peak are priced by their end time — both are approximations.
