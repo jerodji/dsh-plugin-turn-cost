@@ -1,5 +1,12 @@
 # 更新日志
 
+## 1.6.5
+
+- 设置页「会话计费统计」：每个会话的金额改为**该会话总计**——主会话自身加上全部子代理会话（任意层级后代）的花费；子代理会话不再单独列出，避免重复计数。
+- 宿主快照新增 `parentSession`、`subagent`、`subagentCostMicro` / `subagentCostUsdMicro`、`subagentSessions` 与 `totalCostMicro` / `totalCostUsdMicro`（保留 `costMicro` / `costUsdMicro` 为自身值以兼容）；父会话缺失、祖先链成环或过深时，该会话按顶层会话保留。
+- 只有 `header.origin === 'subagent'` 的会话才会折叠进父会话；仅在 `parentSession` 里保留来源的旧 fork / 拷贝会话仍作为独立会话显示，避免其日志中复制的历史被重复计入。
+- 客户端统计页的行金额、合计、分组小计与 Excel 导出统一改用 `sessionTotalMicro`（优先总计，旧宿主回退自身金额）。
+
 ## 1.6.4
 
 - 「设置预算」弹窗的「本会话已用」改为直接读取页脚「本会话」按钮的金额（含已归集子代理花费），不再只算主代理；跨币种预算的对比同步纳入子代理部分（近似汇率折算）。

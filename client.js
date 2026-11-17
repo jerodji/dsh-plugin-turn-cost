@@ -3056,6 +3056,22 @@ window.__ModuleLoader__.load({
       return Number(record.costMicro) || 0;
     }
 
+    /**
+     * A Session's amount in the active currency. The Host folds the Session
+     * itself plus every descendant subagent Session into `totalCostMicro` /
+     * `totalCostUsdMicro`; older Hosts only send the own `costMicro` /
+     * `costUsdMicro`, so fall back to those.
+     */
+    function sessionTotalMicro(record) {
+      if (!record || typeof record !== 'object') return 0;
+      if (activeCurrency() === 'USD') {
+        const total = record.totalCostUsdMicro;
+        return Number(total !== undefined && total !== null ? total : record.costUsdMicro) || 0;
+      }
+      const total = record.totalCostMicro;
+      return Number(total !== undefined && total !== null ? total : record.costMicro) || 0;
+    }
+
     function displayPath(path) {
       const parts = String(path || '')
         .split(/[\\/]/)
@@ -3401,13 +3417,13 @@ window.__ModuleLoader__.load({
           },
           session.error
             ? '—'
-            : session.turns > 0 && amountMicroIn(session) === 0 && Number(session.planTurns) > 0
+            : session.turns > 0 && sessionTotalMicro(session) === 0 && Number(session.planTurns) > 0
               ? t('costPlan')
-              : session.turns > 0 && amountMicroIn(session) === 0 && Number(session.freeTurns) > 0 && (session.missingTurns || []).length === 0
+              : session.turns > 0 && sessionTotalMicro(session) === 0 && Number(session.freeTurns) > 0 && (session.missingTurns || []).length === 0
               ? `${symbolFor()}0`
-              : session.turns > 0 && amountMicroIn(session) === 0 && (session.missingTurns || []).length > 0
+              : session.turns > 0 && sessionTotalMicro(session) === 0 && (session.missingTurns || []).length > 0
                 ? `${symbolFor()}??`
-                : moneyMicro(amountMicroIn(session)),
+                : moneyMicro(sessionTotalMicro(session)),
         ),
       );
     }
@@ -3952,7 +3968,7 @@ window.__ModuleLoader__.load({
       const visibleSessions = filterSessionsByRange(sessions, timeRange, Date.now());
       const visibleTotals = visibleSessions.reduce(
         (acc, session) => {
-          acc.costMicro += amountMicroIn(session);
+          acc.costMicro += sessionTotalMicro(session);
           acc.sessions += 1;
           return acc;
         },
@@ -4004,7 +4020,7 @@ window.__ModuleLoader__.load({
           const groupTitle = mode === 'flat' ? '' : group.title || t('unknownDir');
           const groupMicro = picked
             .filter((session) => !session.error)
-            .reduce((sum, session) => sum + amountMicroIn(session), 0);
+            .reduce((sum, session) => sum + sessionTotalMicro(session), 0);
           if (mode !== 'flat') rows.push({ kind: 'group', title: groupTitle, amountMicro: groupMicro });
           for (const session of picked) {
             rows.push({
@@ -4013,7 +4029,7 @@ window.__ModuleLoader__.load({
               title: session.title || session.sessionId,
               sessionId: session.sessionId,
               time: formatSessionTime(session.createdAt),
-              amountMicro: amountMicroIn(session),
+              amountMicro: sessionTotalMicro(session),
               turns: session.turns,
               error: session.error || null,
             });
@@ -4491,7 +4507,7 @@ window.__ModuleLoader__.load({
                           h(
                             'span',
                             { style: { ...MUTED, color: 'var(--dsw-alias-label-secondary)' } },
-                            moneyMicro(group.sessions.reduce((sum, session) => sum + amountMicroIn(session), 0)),
+                            moneyMicro(group.sessions.reduce((sum, session) => sum + sessionTotalMicro(session), 0)),
                           ),
                         ),
                     ...(collapsedKeys[group.key] === true
@@ -5283,6 +5299,7 @@ window.__ModuleLoader__.load({
         panelPosition,
         publishSessionPill,
         sessionPillMicro,
+        sessionTotalMicro,
       },
       subagents: {
         attributeTurn: attributeSubagents,

@@ -208,12 +208,19 @@ async function buildFullState(ctx) {
       const summary = await sessionSummary(sessionQuery, sessionId);
       sessions.push({
         sessionId,
+        parentSession: header && typeof header.parentSession === 'string' ? header.parentSession : '',
+        subagent: header !== undefined && header.origin === 'subagent',
         title: summary.title,
         cwd: header && typeof header.cwd === 'string' ? header.cwd : '',
         createdAt: toNumber(header && header.createdAt),
         live: record.live === true,
         costMicro: summary.costMicro,
         costUsdMicro: summary.costUsdMicro,
+        subagentCostMicro: 0,
+        subagentCostUsdMicro: 0,
+        subagentSessions: 0,
+        totalCostMicro: summary.costMicro,
+        totalCostUsdMicro: summary.costUsdMicro,
         turns: summary.turns,
         pricedTurns: summary.pricedTurns,
         freeTurns: summary.freeTurns,
@@ -227,12 +234,19 @@ async function buildFullState(ctx) {
     } catch (error) {
       sessions.push({
         sessionId,
+        parentSession: header && typeof header.parentSession === 'string' ? header.parentSession : '',
+        subagent: header !== undefined && header.origin === 'subagent',
         title: '',
         cwd: header && typeof header.cwd === 'string' ? header.cwd : '',
         createdAt: toNumber(header && header.createdAt),
         live: record.live === true,
         costMicro: 0,
         costUsdMicro: 0,
+        subagentCostMicro: 0,
+        subagentCostUsdMicro: 0,
+        subagentSessions: 0,
+        totalCostMicro: 0,
+        totalCostUsdMicro: 0,
         turns: 0,
         pricedTurns: 0,
         freeTurns: 0,
@@ -246,9 +260,58 @@ async function buildFullState(ctx) {
     }
   }
 
+  // Fold subagent Sessions into their ancestors. Only headers already read
+  // above are used, so this adds no log reads. A record whose parentSession
+  // does not resolve to another row of this list stays at the top level, as
+  // does a session whose ancestry is a cycle or exceeds the depth cap (both
+  // are treated as dirty data and not aggregated into anyone).
+  const MAX_ANCESTOR_DEPTH = 256;
+  const byId = new Map();
+  for (const session of sessions) byId.set(session.sessionId, session);
+  const ancestryOf = (session) => {
+    const ancestors = [];
+    const seen = new Set([session.sessionId]);
+    let current = session;
+    for (let depth = 0; depth < MAX_ANCESTOR_DEPTH; depth += 1) {
+      if (current.parentSession === '') return { ancestors, terminates: true };
+      const parent = byId.get(current.parentSession);
+      if (parent === undefined) return { ancestors, terminates: true };
+      if (seen.has(parent.sessionId)) return { ancestors, terminates: false };
+      seen.add(parent.sessionId);
+      ancestors.push(parent);
+      current = parent;
+    }
+    return { ancestors, terminates: false };
+  };
+  for (const session of sessions) {
+    if (session.subagent !== true) continue;
+    const { ancestors, terminates } = ancestryOf(session);
+    if (!terminates) continue;
+    for (const ancestor of ancestors) {
+      ancestor.subagentCostMicro += session.costMicro;
+      ancestor.subagentCostUsdMicro += session.costUsdMicro;
+      ancestor.subagentSessions += 1;
+    }
+  }
+  for (const session of sessions) {
+    session.totalCostMicro = session.costMicro + session.subagentCostMicro;
+    session.totalCostUsdMicro = session.costUsdMicro + session.subagentCostUsdMicro;
+  }
+  // Only Sessions that own no recorded ancestor are listed; descendants are
+  // represented by their top ancestor's total. A cycle member has no recorded
+  // ancestor by definition and stays visible so its cost is not lost.
+  const topLevel = sessions.filter((session) => {
+    // A plain fork may keep its source in `parentSession`; only a real
+    // subagent Session (origin === 'subagent') is folded into its parent.
+    if (session.subagent !== true) return true;
+    if (session.parentSession === '') return true;
+    if (!byId.has(session.parentSession)) return true;
+    return ancestryOf(session).terminates === false;
+  });
+
   const workspaces = [];
   const seen = new Set();
-  for (const session of sessions) {
+  for (const session of topLevel) {
     const workspace = session.workspace;
     if (workspace === null || workspace === undefined) continue;
     const id = String(workspace.id);
@@ -264,17 +327,17 @@ async function buildFullState(ctx) {
     });
   }
   for (const workspace of workspaces) {
-    for (const session of sessions) {
+    for (const session of topLevel) {
       if (session.workspace !== null && String(session.workspace.id) === workspace.id) {
-        workspace.costMicro += session.costMicro;
-        workspace.costUsdMicro += session.costUsdMicro;
+        workspace.costMicro += session.totalCostMicro;
+        workspace.costUsdMicro += session.totalCostUsdMicro;
         workspace.sessions += 1;
       }
     }
   }
   // Sessions that no Workspace owns still group under their own directory.
   const extra = new Map();
-  for (const session of sessions) {
+  for (const session of topLevel) {
     if (session.workspace !== null) continue;
     const cwd = session.cwd || '';
     if (!extra.has(cwd)) {
@@ -288,18 +351,18 @@ async function buildFullState(ctx) {
       });
     }
     const group = extra.get(cwd);
-    group.costMicro += session.costMicro;
-    group.costUsdMicro += session.costUsdMicro;
+    group.costMicro += session.totalCostMicro;
+    group.costUsdMicro += session.totalCostUsdMicro;
     group.sessions += 1;
   }
   workspaces.push(...extra.values());
 
-  const totals = { costMicro: 0, costUsdMicro: 0, sessions: sessions.length };
-  for (const session of sessions) {
-    totals.costMicro += session.costMicro;
-    totals.costUsdMicro += session.costUsdMicro;
+  const totals = { costMicro: 0, costUsdMicro: 0, sessions: topLevel.length };
+  for (const session of topLevel) {
+    totals.costMicro += session.totalCostMicro;
+    totals.costUsdMicro += session.totalCostUsdMicro;
   }
-  return { sessions, workspaces, totals, degraded: null };
+  return { sessions: topLevel, workspaces, totals, degraded: null };
 }
 
 function buildWorkspaceIndexSafe(registry) {

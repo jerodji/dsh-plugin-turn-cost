@@ -330,6 +330,141 @@ const SUB_UNRELATED = {
   events: eventsFor(1),
 };
 
+/* Full-state aggregation: a parent Session plus subagents at any depth. */
+const AGG_PARENT = {
+  header: { id: 'agg-parent', cwd: '/work/agg', createdAt: 1000 },
+  events: [...eventsFor(1), ...eventsFor(2, { time: MONDAY_OFFPEAK })],
+};
+const AGG_CHILD = {
+  header: { id: 'agg-child', parentSession: 'agg-parent', origin: 'subagent', delegationDepth: 1, createdAt: 2000 },
+  events: eventsFor(1),
+};
+const AGG_GRAND = {
+  header: { id: 'agg-grand', parentSession: 'agg-child', origin: 'subagent', delegationDepth: 2, createdAt: 3000 },
+  events: eventsFor(1),
+};
+const AGG_PLAN_CHILD = {
+  header: { id: 'agg-plan', parentSession: 'agg-parent', origin: 'subagent', delegationDepth: 1, createdAt: 2500 },
+  events: eventsFor(1, { provider: 'chatgpt', model: 'gpt-5' }),
+};
+const AGG_ERROR_CHILD = {
+  header: { id: 'agg-err', parentSession: 'agg-parent', origin: 'subagent', delegationDepth: 1, createdAt: 2600 },
+  events: eventsFor(1),
+};
+const AGG_ORPHAN = {
+  header: { id: 'agg-orphan', parentSession: 'missing-parent', origin: 'subagent', createdAt: 4000 },
+  events: eventsFor(1),
+};
+const AGG_CYCLE_A = {
+  header: { id: 'agg-cycle-a', parentSession: 'agg-cycle-b', origin: 'subagent', createdAt: 5000 },
+  events: eventsFor(1),
+};
+const AGG_CYCLE_B = {
+  header: { id: 'agg-cycle-b', parentSession: 'agg-cycle-a', origin: 'subagent', createdAt: 5001 },
+  events: eventsFor(1),
+};
+const AGG_UNRELATED = {
+  header: { id: 'agg-unrelated', createdAt: 6000 },
+  events: eventsFor(1),
+};
+// An old fork/copy may keep its source in parentSession but has no subagent
+// origin, so it must stay a session of its own.
+const AGG_FORK = {
+  header: { id: 'agg-fork', parentSession: 'agg-parent', createdAt: 7000 },
+  events: eventsFor(1),
+};
+
+await test('full state: subagent costs roll up into every ancestor total', async () => {
+  resetBillingCache();
+  setPlanProviders(['chatgpt']);
+  try {
+    const fake = fakeCtx({
+      sessions: [
+        AGG_PARENT,
+        AGG_CHILD,
+        AGG_GRAND,
+        AGG_PLAN_CHILD,
+        AGG_ERROR_CHILD,
+        AGG_ORPHAN,
+        AGG_CYCLE_A,
+        AGG_CYCLE_B,
+        AGG_UNRELATED,
+      ],
+      workspaces: [{ id: 'ws-agg', title: 'Agg', path: '/work/agg', sessionIds: ['agg-parent'] }],
+      failSessions: ['agg-err'],
+    });
+    const data = await readBillingState(fake.ctx, 'full');
+
+    // Descendants are represented by their top ancestor; broken or cyclic
+    // chains stay listed so no cost disappears.
+    assert.deepEqual(
+      data.sessions.map((session) => session.sessionId),
+      ['agg-parent', 'agg-orphan', 'agg-cycle-a', 'agg-cycle-b', 'agg-unrelated'],
+    );
+
+    const parent = data.sessions[0];
+    assert.equal(parent.parentSession, '');
+    assert.equal(parent.costMicro, 3_510_000);
+    assert.equal(parent.costUsdMicro, 526_500);
+    // Children: 2,340,000 + 2,340,000 (grandchild) + 0 (plan) + 0 (error).
+    assert.equal(parent.subagentCostMicro, 4_680_000);
+    assert.equal(parent.subagentCostUsdMicro, 702_000);
+    assert.equal(parent.subagentSessions, 4);
+    assert.equal(parent.totalCostMicro, 8_190_000);
+    assert.equal(parent.totalCostUsdMicro, 1_228_500);
+
+    const orphan = data.sessions[1];
+    assert.equal(orphan.parentSession, 'missing-parent');
+    assert.equal(orphan.subagentCostMicro, 0);
+    assert.equal(orphan.totalCostMicro, 2_340_000);
+
+    // A cycle is dirty data: both members stay top level and nobody doubles.
+    for (const cycleId of ['agg-cycle-a', 'agg-cycle-b']) {
+      const row = data.sessions.find((session) => session.sessionId === cycleId);
+      assert.equal(row.subagentCostMicro, 0);
+      assert.equal(row.totalCostMicro, 2_340_000);
+    }
+
+    // Totals equal the sum of every Session's own cost (no double count).
+    assert.equal(data.totals.sessions, 5);
+    assert.equal(data.totals.costMicro, 17_550_000);
+    assert.equal(data.totals.costUsdMicro, 2_632_500);
+
+    const workspace = data.workspaces.find((item) => item.id === 'ws-agg');
+    assert.equal(workspace.costMicro, 8_190_000);
+    assert.equal(workspace.costUsdMicro, 1_228_500);
+    assert.equal(workspace.sessions, 1);
+    const unowned = data.workspaces.find((item) => item.id === 'cwd:');
+    assert.equal(unowned.costMicro, 9_360_000);
+    assert.equal(unowned.sessions, 4);
+
+    // Only the headers were read: no extra log pass for the roll-up.
+    assert.equal(fake.listCalls.value, 1);
+    assert.equal(fake.reads.size, 9);
+  } finally {
+    setPlanProviders([]);
+  }
+});
+
+await test('a plain fork with parentSession stays at the top level', async () => {
+  resetBillingCache();
+  const fake = fakeCtx({ sessions: [AGG_PARENT, AGG_FORK] });
+  const data = await readBillingState(fake.ctx, 'full');
+  assert.deepEqual(
+    data.sessions.map((session) => session.sessionId),
+    ['agg-parent', 'agg-fork'],
+  );
+  const parent = data.sessions[0];
+  assert.equal(parent.subagentCostMicro, 0);
+  assert.equal(parent.totalCostMicro, 3_510_000);
+  const fork = data.sessions[1];
+  assert.equal(fork.subagent, false);
+  assert.equal(fork.parentSession, 'agg-parent');
+  assert.equal(fork.totalCostMicro, 2_340_000);
+  assert.equal(data.totals.sessions, 2);
+  assert.equal(data.totals.costMicro, 5_850_000);
+});
+
 await test('subagents scope lists descendants with compact ended turns', async () => {
   resetBillingCache();
   setPlanProviders(['chatgpt']);

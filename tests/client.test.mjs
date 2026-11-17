@@ -934,6 +934,27 @@ test('select-all only touches visible ids (A8)', () => {
   assert.deepEqual(mergeVisibleSelection({}, [], true), {});
 });
 
+test('settings rows prefer the host session total (1.6.5)', () => {
+  const { sessionTotalMicro } = plugin.helpers;
+  const restore = plugin.settings.read();
+  try {
+    plugin.settings.write({ ...restore, currency: 'CNY' });
+    assert.equal(sessionTotalMicro({ costMicro: 100, totalCostMicro: 250 }), 250);
+    assert.equal(sessionTotalMicro({ costMicro: 100 }), 100);
+    assert.equal(sessionTotalMicro({ costMicro: 100, totalCostMicro: null }), 100);
+    assert.equal(sessionTotalMicro({ totalCostMicro: 0, costMicro: 100 }), 0);
+    assert.equal(sessionTotalMicro(undefined), 0);
+
+    plugin.settings.write({ ...restore, currency: 'USD' });
+    assert.equal(sessionTotalMicro({ costUsdMicro: 10, totalCostUsdMicro: 25 }), 25);
+    assert.equal(sessionTotalMicro({ costUsdMicro: 10 }), 10);
+    // A CNY total never leaks into the USD display.
+    assert.equal(sessionTotalMicro({ costMicro: 100, totalCostMicro: 250, costUsdMicro: 10 }), 10);
+  } finally {
+    plugin.settings.write(restore);
+  }
+});
+
 test('store skips identical writes (B5)', () => {
   const rows = new Map();
   let writes = 0;
