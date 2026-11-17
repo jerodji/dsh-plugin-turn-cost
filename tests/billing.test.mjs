@@ -467,18 +467,22 @@ await test('a plain fork with parentSession stays at the top level', async () =>
 
 await test('a parent created long ago inherits its subagents last activity', async () => {
   resetBillingCache();
-  const now = Date.now();
+  // 10:00 local is inside the weekday peak window, so this test does not
+  // depend on the wall clock at which the suite happens to run.
+  const peakToday = new Date();
+  peakToday.setHours(10, 0, 0, 0);
+  const peakTime = peakToday.getTime();
   const parent = { header: { id: 'la-parent', createdAt: 1000 }, events: [] };
   const child = {
-    header: { id: 'la-child', parentSession: 'la-parent', origin: 'subagent', createdAt: now - 120_000 },
-    events: eventsFor(1, { time: now - 60_000 }),
+    header: { id: 'la-child', parentSession: 'la-parent', origin: 'subagent', createdAt: peakTime - 120_000 },
+    events: eventsFor(1, { time: peakTime }),
   };
   const fake = fakeCtx({ sessions: [parent, child] });
   const data = await readBillingState(fake.ctx, 'full');
   assert.equal(data.sessions.length, 1);
   const row = data.sessions[0];
   assert.equal(row.sessionId, 'la-parent');
-  assert.equal(row.lastActivityAt, now - 60_000 + 2000);
+  assert.equal(row.lastActivityAt, peakTime + 2000);
   assert.ok(row.lastActivityAt > row.createdAt);
   assert.equal(row.totalCostMicro, 2_340_000);
   assert.equal(row.subagentCostMicro, 2_340_000);

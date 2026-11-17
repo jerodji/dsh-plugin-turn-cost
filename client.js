@@ -2226,6 +2226,15 @@ window.__ModuleLoader__.load({
       // already a finished turn; its attribution window is closed and polling
       // would only re-read child logs for data that can no longer change.
       const [subagentSessions, setSubagentSessions] = React.useState(undefined);
+      // The「本会话」pill value is computed later in this render; stash it here
+      // and publish from an effect (never during render) so the budget pill can
+      // subscribe and refresh as soon as a turn ends.
+      const pillSnapshotRef = typeof React.useRef === 'function' ? React.useRef(undefined) : { current: undefined };
+      React.useEffect(() => {
+        const snapshot = pillSnapshotRef.current;
+        if (snapshot === undefined || snapshot === null) return;
+        publishSessionPill(sessionId, snapshot);
+      }, [sessionId, projection, settings, subagentSessions, props.turn]);
       React.useEffect(() => {
         let alive = true;
         if (typeof sessionId !== 'string' || sessionId === '' || typeof fetch !== 'function') {
@@ -2395,16 +2404,18 @@ window.__ModuleLoader__.load({
       }
       const sessionPlanOnly = session !== undefined && session.planOnly === true && subagentSessionMicro <= 0;
       // Hand the exact pill value to the budget popover (same Session, same
-      // currency, same cut-off) so both always agree.
-      if (session !== undefined && sessionId !== '' && !sessionPlanOnly) {
-        publishSessionPill(sessionId, {
-          micro: Math.round(
-            ((session.planOnly ? 0 : Number(session.sum) || 0) + subagentSessionMicro / 1e6) * 1e6,
-          ),
-          currency: currencyNow,
-          cutoff: sessionCutoff,
-        });
-      }
+      // currency, same cut-off) so both always agree. The effect above publishes
+      // it after the render; the listener set notifies only on real changes.
+      pillSnapshotRef.current =
+        session !== undefined && sessionId !== '' && !sessionPlanOnly
+          ? {
+              micro: Math.round(
+                ((session.planOnly ? 0 : Number(session.sum) || 0) + subagentSessionMicro / 1e6) * 1e6,
+              ),
+              currency: currencyNow,
+              cutoff: sessionCutoff,
+            }
+          : undefined;
       const sessionBoundPrefix = session === undefined ? '' : session.partial ? '≥ ' : '';
       // One Session dialog: the total line and the subagent breakdown describe
       // the same combined number (own priced spend + attributed subagent spend).
@@ -2691,6 +2702,7 @@ window.__ModuleLoader__.load({
      * move backwards.
      */
     const sessionPillSnapshots = new Map();
+    const sessionPillListeners = new Set();
     const SESSION_PILL_LIMIT = 50;
 
     function publishSessionPill(sessionId, snapshot) {
@@ -2700,12 +2712,35 @@ window.__ModuleLoader__.load({
       if (!Number.isFinite(micro)) return;
       const prev = sessionPillSnapshots.get(sessionId);
       if (prev !== undefined && prev.cutoff > cutoff && prev.currency === snapshot.currency) return;
+      const next = { micro: Math.max(0, Math.round(micro)), currency: snapshot.currency, cutoff };
+      const changed =
+        prev === undefined ||
+        prev.micro !== next.micro ||
+        prev.currency !== next.currency ||
+        prev.cutoff !== next.cutoff;
       sessionPillSnapshots.delete(sessionId);
-      sessionPillSnapshots.set(sessionId, { micro: Math.max(0, Math.round(micro)), currency: snapshot.currency, cutoff });
+      sessionPillSnapshots.set(sessionId, next);
       if (sessionPillSnapshots.size > SESSION_PILL_LIMIT) {
         const oldest = sessionPillSnapshots.keys().next();
         if (!oldest.done && oldest.value !== sessionId) sessionPillSnapshots.delete(oldest.value);
       }
+      if (!changed) return;
+      for (const listener of sessionPillListeners) {
+        try {
+          listener(sessionId, next);
+        } catch {
+          // A listener must never break the publishing badge.
+        }
+      }
+    }
+
+    /** Subscribe to「本会话」pill changes; returns an unsubscribe function. */
+    function subscribeSessionPill(listener) {
+      if (typeof listener !== 'function') return () => {};
+      sessionPillListeners.add(listener);
+      return () => {
+        sessionPillListeners.delete(listener);
+      };
     }
 
     function sessionPillMicro(sessionId, currency) {
@@ -4751,6 +4786,20 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener(BUDGET_EVENT, sync);
       }, []);
 
+      // The footer badge republishes the「本会话」pill after every turn; refresh
+      // this entry when the value changes so an over-budget pill turns orange
+      // immediately instead of waiting for a hover.
+      React.useEffect(() => {
+        const off = subscribeSessionPill(() => forceRender((value) => value + 1));
+        // A sibling badge may already have published the first snapshot before
+        // this subscription existed (sibling effect order is not guaranteed),
+        // so refresh once to pick it up on the first mount.
+        forceRender((value) => value + 1);
+        return () => {
+          off();
+        };
+      }, []);
+
 
       React.useEffect(() => {
         const offDisplay = subscribeDisplaySettings((next) => setSettings(next));
@@ -5306,6 +5355,7 @@ window.__ModuleLoader__.load({
         mergeVisibleSelection,
         panelPosition,
         publishSessionPill,
+        subscribeSessionPill,
         sessionPillMicro,
         sessionTotalMicro,
         sessionActivityTime,

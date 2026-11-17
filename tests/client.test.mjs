@@ -1048,6 +1048,90 @@ test('client holiday table matches the host table (C1)', () => {
   assert.match(source, /if \(HOLIDAY_DAYS\.has\(beijingDayKey\(date\)\)\) return false;/);
 });
 
+test('session pill subscriptions fire only on real changes', () => {
+  const { publishSessionPill, subscribeSessionPill } = plugin.helpers;
+  const events = [];
+  const off = subscribeSessionPill((id, snapshot) => events.push([id, snapshot.micro]));
+  publishSessionPill('pill-sub-test', { micro: 1000, currency: 'CNY', cutoff: 10 });
+  assert.equal(events.length, 1);
+  publishSessionPill('pill-sub-test', { micro: 1000, currency: 'CNY', cutoff: 10 });
+  assert.equal(events.length, 1, 'an identical snapshot must not notify');
+  publishSessionPill('pill-sub-test', { micro: 2000, currency: 'CNY', cutoff: 10 });
+  assert.equal(events.length, 2);
+  publishSessionPill('pill-sub-test', { micro: 3000, currency: 'CNY', cutoff: 5 });
+  assert.equal(events.length, 2, 'a cutoff rollback must not notify');
+  off();
+  publishSessionPill('pill-sub-test', { micro: 4000, currency: 'CNY', cutoff: 20 });
+  assert.equal(events.length, 2, 'unsubscribed listeners must not fire');
+});
+
+test('pill publishing happens in an effect and the budget pill subscribes (1.6.7)', () => {
+  const source = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'client.js'), 'utf8');
+  assert.ok(source.includes('const sessionPillListeners = new Set();'));
+  assert.ok(source.includes('function subscribeSessionPill(listener)'));
+  const badgeStart = source.indexOf('function TurnCostBadge(');
+  const badgeEnd = source.indexOf('const sessionPillSnapshots = new Map();');
+  assert.ok(badgeStart > 0 && badgeEnd > badgeStart);
+  const badge = source.slice(badgeStart, badgeEnd);
+  assert.equal((badge.match(/publishSessionPill\(/g) || []).length, 1, 'badge publishes once, from its effect');
+  const effectAt = badge.indexOf('const snapshot = pillSnapshotRef.current');
+  const publishAt = badge.indexOf('publishSessionPill(sessionId, snapshot)');
+  const earlyReturn = badge.indexOf('if (!hasTurn && !hasSession) return null;');
+  assert.ok(effectAt > 0 && effectAt < earlyReturn, 'the publishing effect must be in the hook area');
+  assert.ok(publishAt > effectAt && publishAt < earlyReturn);
+  assert.ok(badge.includes('pillSnapshotRef.current ='));
+  const composer = source.slice(badgeEnd);
+  assert.ok(composer.includes('const off = subscribeSessionPill(() => forceRender((value) => value + 1));'));
+  assert.ok(composer.includes('off();'));
+  const at = composer.indexOf('const off = subscribeSessionPill(');
+  const end = composer.indexOf('}, []);', at);
+  assert.ok(at > 0 && end > at);
+  const effect = composer
+    .slice(at, end)
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('//'))
+    .join('\n');
+  assert.match(
+    effect,
+    /subscribeSessionPill\(\(\) => forceRender\(\(value\) => value \+ 1\)\);\s*forceRender\(\(value\) => value \+ 1\);/,
+    'the subscription effect must refresh once after subscribing to catch a missed first publish',
+  );
+});
+
+test('budget pill turns orange after a new pill value without hovering', () => {
+  const Composer = registered['turn-cost-composer'];
+  assert.equal(typeof Composer, 'function', 'composer entry must be registered');
+  const restore = plugin.settings.read();
+  const restoreBudget = localStorage.getItem('dsh.turn-cost.budget.v1');
+  plugin.settings.write({ ...restore, currency: 'CNY', showBudget: true });
+  localStorage.setItem(
+    'dsh.turn-cost.budget.v1',
+    JSON.stringify({ v: 2, budgets: { 'pill-render': { micro: 100_000_000, currency: 'USD' } } }),
+  );
+  try {
+    const view = { ...viewWith([entry(1)]), sessionId: 'pill-render' };
+    const props = { t, sessionId: 'pill-render', useProjection: () => view, useChat: () => undefined };
+    resetHooks();
+    let tree = render(Composer, props);
+    const before = findByAttr(tree, 'data-dsh-budget-toggle');
+    assert.ok(before, 'budget pill must render');
+    assert.notEqual(before.props.style.color, 'var(--dsw-alias-state-warn-primary)');
+    plugin.helpers.publishSessionPill('pill-render', {
+      micro: 2_000_000_000,
+      currency: 'CNY',
+      cutoff: Date.now(),
+    });
+    tree = render(Composer, props);
+    const after = findByAttr(tree, 'data-dsh-budget-toggle');
+    assert.ok(after);
+    assert.equal(after.props.style.color, 'var(--dsw-alias-state-warn-primary)');
+  } finally {
+    plugin.settings.write(restore);
+    if (restoreBudget === null) localStorage.removeItem('dsh.turn-cost.budget.v1');
+    else localStorage.setItem('dsh.turn-cost.budget.v1', restoreBudget);
+  }
+});
+
 for (const result of results) {
   if (result.ok) console.log(`PASS  ${result.name}`);
   else {
