@@ -64,11 +64,13 @@ function fakeCtx({ sessions, workspaces = [], balance = null, failSessions = [] 
       return { inheritedEventCount: 0, events: session ? session.events : [], session: session ? session.header : undefined };
     },
   };
+  const balanceCalls = { value: 0 };
   const services = {
     sessionQuery: query,
     workspaceRegistry: { list: () => workspaces },
     deepseekAccount: {
       async getBalance() {
+        balanceCalls.value += 1;
         return balance;
       },
     },
@@ -77,6 +79,7 @@ function fakeCtx({ sessions, workspaces = [], balance = null, failSessions = [] 
     ctx: { get: (name) => services[name], logger: { warn() {} } },
     listCalls,
     reads,
+    balanceCalls,
   };
 }
 
@@ -178,6 +181,29 @@ await test('degraded when the session service is unavailable', async () => {
   assert.equal(data.degraded, 'session service unavailable');
   assert.deepEqual(data.sessions, []);
   assert.equal(data.totals.sessions, 0);
+});
+
+await test('fresh=1 bypasses the Host 30 s cache (1.6.4)', async () => {
+  resetBillingCache();
+  const { ctx, balanceCalls } = fakeCtx({
+    sessions: [],
+    balance: { status: 'ready', value: [], bonusWallets: [] },
+  });
+  const first = await readBillingState(ctx, 'balance');
+  const cached = await readBillingState(ctx, 'balance');
+  assert.equal(cached.updatedAt, first.updatedAt, 'second read may be cached');
+  assert.equal(balanceCalls.value, 1, 'cached read must not hit the account service');
+  const forced = await readBillingState(ctx, 'balance', undefined, true);
+  assert.ok(forced.updatedAt >= first.updatedAt);
+  assert.equal(balanceCalls.value, 2, 'forced read rebuilds from the live services');
+  // The route forwards ?fresh=1 the same way.
+  const response = await handleStateRequest(
+    ctx,
+    request('http://127.0.0.1:1' + STATE_ROUTE + '?scope=balance&fresh=1', { 'x-dsh-turn-cost': '1' }),
+  );
+  assert.equal(response.status, 200);
+  await response.json();
+  assert.equal(balanceCalls.value, 3);
 });
 
 /* ------------------------------------------------------------------ */

@@ -955,6 +955,34 @@ test('store skips identical writes (B5)', () => {
   assert.equal(writes, 2, 'changed record writes again');
 });
 
+test('session pill snapshot feeds the budget popover (1.6.4)', () => {
+  const { publishSessionPill, sessionPillMicro } = plugin.helpers;
+  publishSessionPill('pill-a', { micro: 19_382_000, currency: 'CNY', cutoff: 1000 });
+  assert.equal(sessionPillMicro('pill-a', 'CNY'), 19_382_000);
+  assert.equal(sessionPillMicro('pill-a', 'USD'), undefined);
+  // A historical badge rendering after the newest one must not move the
+  // cumulative cut-off backwards.
+  publishSessionPill('pill-a', { micro: 1_000_000, currency: 'CNY', cutoff: 500 });
+  assert.equal(sessionPillMicro('pill-a', 'CNY'), 19_382_000);
+  // A later turn publishes a larger cumulative value.
+  publishSessionPill('pill-a', { micro: 20_000_000, currency: 'CNY', cutoff: 2000 });
+  assert.equal(sessionPillMicro('pill-a', 'CNY'), 20_000_000);
+  // Switching the display currency republishes at the same cut-off.
+  publishSessionPill('pill-a', { micro: 2_700_000, currency: 'USD', cutoff: 2000 });
+  assert.equal(sessionPillMicro('pill-a', 'USD'), 2_700_000);
+  assert.equal(sessionPillMicro('pill-a', 'CNY'), undefined);
+  publishSessionPill('pill-b', { micro: Number.NaN, currency: 'CNY', cutoff: 1 });
+  assert.equal(sessionPillMicro('pill-b', 'CNY'), undefined);
+  assert.equal(sessionPillMicro('', 'CNY'), undefined);
+});
+
+test('budget popover reads the pill and refreshes the balance on open (1.6.4)', () => {
+  const source = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'client.js'), 'utf8');
+  assert.match(source, /const pillMicro = sessionPillMicro\(sessionId, displayCurrency\);/);
+  assert.match(source, /refreshBalance\(true\);/);
+  assert.match(source, /const fresh = force \? '&fresh=1' : '';/);
+});
+
 test('client holiday table matches the host table (C1)', () => {
   const source = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'client.js'), 'utf8');
   const block = source.match(/const HOLIDAY_RANGES = \[([\s\S]*?)\];/);

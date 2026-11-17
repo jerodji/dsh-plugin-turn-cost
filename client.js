@@ -2394,6 +2394,17 @@ window.__ModuleLoader__.load({
         sessionAmountText = `${session.approx && !session.planOnly ? '≈' : ''}${money(ownValue + subagentSessionMicro / 1e6, currencyNow)}`;
       }
       const sessionPlanOnly = session !== undefined && session.planOnly === true && subagentSessionMicro <= 0;
+      // Hand the exact pill value to the budget popover (same Session, same
+      // currency, same cut-off) so both always agree.
+      if (session !== undefined && sessionId !== '' && !sessionPlanOnly) {
+        publishSessionPill(sessionId, {
+          micro: Math.round(
+            ((session.planOnly ? 0 : Number(session.sum) || 0) + subagentSessionMicro / 1e6) * 1e6,
+          ),
+          currency: currencyNow,
+          cutoff: sessionCutoff,
+        });
+      }
       const sessionBoundPrefix = session === undefined ? '' : session.partial ? '≥ ' : '';
       // One Session dialog: the total line and the subagent breakdown describe
       // the same combined number (own priced spend + attributed subagent spend).
@@ -2671,6 +2682,37 @@ window.__ModuleLoader__.load({
     /** Shared subagent snapshot cache so many badges / the poll share one fetch. */
     const subagentFetchCache = new Map();
     const SUBAGENT_FETCH_TTL_MS = 10000;
+    /**
+     * Latest 「本会话」 pill value (in the then-active currency). A mounted
+     * TurnCostBadge publishes it, so the budget popover can show exactly the
+     * number the footer button shows -- own Session total plus the subagent
+     * spend attributed to that Session -- instead of recomputing an own-only
+     * total. Historical badges render too; the cumulative cut-off must never
+     * move backwards.
+     */
+    const sessionPillSnapshots = new Map();
+    const SESSION_PILL_LIMIT = 50;
+
+    function publishSessionPill(sessionId, snapshot) {
+      if (!sessionId || snapshot === undefined) return;
+      const micro = Number(snapshot.micro);
+      const cutoff = Number(snapshot.cutoff) || 0;
+      if (!Number.isFinite(micro)) return;
+      const prev = sessionPillSnapshots.get(sessionId);
+      if (prev !== undefined && prev.cutoff > cutoff && prev.currency === snapshot.currency) return;
+      sessionPillSnapshots.delete(sessionId);
+      sessionPillSnapshots.set(sessionId, { micro: Math.max(0, Math.round(micro)), currency: snapshot.currency, cutoff });
+      if (sessionPillSnapshots.size > SESSION_PILL_LIMIT) {
+        const oldest = sessionPillSnapshots.keys().next();
+        if (!oldest.done && oldest.value !== sessionId) sessionPillSnapshots.delete(oldest.value);
+      }
+    }
+
+    function sessionPillMicro(sessionId, currency) {
+      const snapshot = sessionPillSnapshots.get(sessionId);
+      if (snapshot === undefined || snapshot.currency !== currency) return undefined;
+      return snapshot.micro;
+    }
     /** A hung Host request must fail instead of blocking the overlay forever. */
     const FETCH_TIMEOUT_MS = 15000;
 
@@ -2688,6 +2730,9 @@ window.__ModuleLoader__.load({
         typeof sessionId === 'string' && sessionId !== ''
           ? `&sessionId=${encodeURIComponent(sessionId)}`
           : '';
+      // `force` also asks the Host to rebuild instead of answering from its
+      // own 30 s cache (used for the balance refresh on popover open).
+      const fresh = force ? '&fresh=1' : '';
       const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
       const timer =
         controller === undefined
@@ -2695,7 +2740,7 @@ window.__ModuleLoader__.load({
           : setTimeout(() => {
               controller.abort();
             }, FETCH_TIMEOUT_MS);
-      cache.busy = fetch(`${STATE_URL}?scope=${encodeURIComponent(scope)}${suffix}`, {
+      cache.busy = fetch(`${STATE_URL}?scope=${encodeURIComponent(scope)}${suffix}${fresh}`, {
         headers: { 'x-dsh-turn-cost': '1' },
         cache: 'no-store',
         ...(controller === undefined ? {} : { signal: controller.signal }),
@@ -4817,17 +4862,32 @@ window.__ModuleLoader__.load({
         budgetMicro === undefined
           ? undefined
           : `${budgetConverted ? '≈' : ''}${money(budgetMicro / 1e6, displayCurrency)}`;
-      const costMicro = sessionCostMicro(props, sessionId, displayCurrency);
-      // Compare in the currency the budget was set in: the displayed budget was
-      // converted with the approximate FX rate, while the official price lists
-      // differ per currency. Recomputing the cost with the budget currency's
-      // price list keeps both sides on the same official table.
+      const ownCostMicro = sessionCostMicro(props, sessionId, displayCurrency);
+      // 「本会话已用」 mirrors the footer 「本会话」 pill, which the badge
+      // publishes as own Session total + subagent spend. Fall back to the own
+      // total when no badge has rendered yet (e.g. no closed turn).
+      const pillMicro = sessionPillMicro(sessionId, displayCurrency);
+      const costMicro = pillMicro !== undefined ? pillMicro : ownCostMicro;
+      // The budget itself may have been set in the other currency; compare on
+      // one official price table. The subagent part is only measured in the
+      // display currency, so it is converted with the approximate display FX
+      // (the budget pill already marks converted values with ≈).
       const budgetCostMicro =
         budget === undefined
           ? undefined
           : budget.currency === displayCurrency
             ? costMicro
-            : sessionCostMicro(props, sessionId, budget.currency);
+            : (() => {
+                const own = sessionCostMicro(props, sessionId, budget.currency);
+                if (own === undefined) return undefined;
+                const subagent =
+                  pillMicro !== undefined && ownCostMicro !== undefined
+                    ? Math.max(0, pillMicro - ownCostMicro)
+                    : 0;
+                return subagent > 0
+                  ? own + Math.round(approxConvertMicro(subagent, displayCurrency, budget.currency))
+                  : own;
+              })();
       const exceeded =
         budget !== undefined && budgetCostMicro !== undefined && budgetCostMicro >= budget.micro;
       const remaining = remainingSummary(account);
@@ -4861,6 +4921,9 @@ window.__ModuleLoader__.load({
           close();
           return;
         }
+        // 账户剩余 must be current every time the popover opens; the reminder
+        // poll's 60 s cache would otherwise be what the user sees.
+        refreshBalance(true);
         if (budgetMicro === undefined) {
           setDraft('');
           setDraftBase(undefined);
@@ -5218,6 +5281,8 @@ window.__ModuleLoader__.load({
         panelRowParts,
         mergeVisibleSelection,
         panelPosition,
+        publishSessionPill,
+        sessionPillMicro,
       },
       subagents: {
         attributeTurn: attributeSubagents,

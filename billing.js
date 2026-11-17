@@ -415,7 +415,7 @@ async function buildSubagentsState(ctx, sessionId) {
  * only (one account call), 'full' for the Settings page, and 'subagents' for
  * one Session's descendant Sessions (needs `sessionId`).
  */
-export async function readBillingState(ctx, scope, sessionId) {
+export async function readBillingState(ctx, scope, sessionId, force = false) {
   if (scope === 'subagents') {
     const id = typeof sessionId === 'string' ? sessionId.trim() : '';
     if (id === '') throw new Error('sessionId is required for the subagents scope');
@@ -466,12 +466,16 @@ export async function readBillingState(ctx, scope, sessionId) {
   // full list (and vice versa).
   const cache = wantFull ? stateCaches.full : stateCaches.balance;
   const fresh = () => {
+    if (force) return false; // explicit refresh: rebuild from the live services
     if (cache.data === undefined) return false;
     if (Date.now() - cache.at >= SESSION_CACHE_TTL_MS) return false;
     return !wantFull || Array.isArray(cache.data.sessions);
   };
   if (fresh()) return cache.data;
   if (cache.busy !== undefined) {
+    // A forced refresh joins the in-flight read (it just started) instead of
+    // stacking a duplicate account call on top of it.
+    if (force) return cache.busy;
     // Wait for the in-flight read of this same scope, then decide again.
     try {
       await cache.busy;
@@ -539,6 +543,7 @@ export async function handleStateRequest(ctx, request) {
   const scopeParam = url.searchParams.get('scope');
   const scope = scopeParam === 'full' || scopeParam === 'subagents' ? scopeParam : 'balance';
   const sessionId = scope === 'subagents' ? String(url.searchParams.get('sessionId') || '').trim() : '';
+  const fresh = url.searchParams.get('fresh') === '1';
   if (scope === 'subagents' && (sessionId === '' || sessionId.length > 200 || /[\u0000-\u001f]/.test(sessionId))) {
     return new Response(JSON.stringify({ v: 1, error: 'invalid sessionId' }), {
       status: 400,
@@ -546,7 +551,7 @@ export async function handleStateRequest(ctx, request) {
     });
   }
   try {
-    const data = await readBillingState(ctx, scope, sessionId);
+    const data = await readBillingState(ctx, scope, sessionId, fresh);
     return new Response(JSON.stringify(data), {
       status: 200,
       headers: {
