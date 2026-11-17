@@ -2,6 +2,8 @@
 
 > Per-turn cost · session totals · budget and balance reminders · billing dashboard · Excel export · CNY/USD
 
+> **Every amount is an estimate, for reference only — DeepSeek's official bill prevails.** The plugin never bills anything: amounts are derived from token usage in local session logs, the built-in official price lists (separate CNY and USD tables), the built-in 2025–2027 statutory-holiday table, and an approximate FX rate (1 USD ≈ ¥7.1) used only for display conversions. The actual charge may differ; trust the official DeepSeek bill.
+
 Show what each conversation turn and the whole session cost, right under the token usage — plus budget and balance reminders, a full billing dashboard, and Excel export.
 
 ```
@@ -79,7 +81,7 @@ In short: **it turns "how much did these tokens cost?" from invisible and hard t
 - Each footer shows the model and reasoning effort used for that turn (e.g. `DeepSeek-V4.1-Flash High`). The model name matches the picker (host llm catalog first, bundled catalog name as fallback); the effort is recorded per turn from the host `agent/pre-step` model selection into `~/.dsh/turn-cost-selections.json`, so it stays accurate after restarts; the model name is shown in normal grey and the effort in a lighter grey.
 - Peak hours are weekdays 09:00–12:00 and 14:00–18:00 Beijing time; everything else is off-peak at 50% off, judged by **each turn's own end time** (DeepSeek only; catalog prices are flat all day).
 - Web search / fetch is billed per successful request (¥5 or $0.75 per 1,000), only for the new Search/Fetch API and only for DeepSeek models.
-- Statutory holidays are not excluded, and turns spanning peak/off-peak are priced by their end time — both are approximations.
+- Statutory holidays are excluded via the built-in 2025–2027 table (years outside it fall back to the weekday rule); turns spanning peak/off-peak are priced by their end time — both remain approximations.
 - Turns aborted without any reply show no badge and count as 0.
 - **Subagent costs**: subagents are billed in their own sessions; a child turn is attributed to the parent turn whose window contains that child turn's end time (the badge appears only after the turn ends, so its amount is fixed). Continued subagents take their names from the session-level member record, falling back to the child session title, then the first 8 characters of the session ID; plan subagents show "subscription quota" and are excluded from money totals. Still an estimate — the official bill prevails.
 
@@ -88,12 +90,10 @@ In short: **it turns "how much did these tokens cost?" from invisible and hard t
 | DSH version | Status |
 | --- | --- |
 | 0.2.2-rc.1 (the build used for testing) | ✅ Everything works |
-| 0.2.2-alpha.3 and later | ✅ Everything works |
-| 0.1.7-rc.2 – 0.2.2-alpha.2 | ⚠️ Core features work (footer amounts, detail dialogs, budget, balance reminder, billing statistics, Excel export); no Settings nav icon (that slot exists only from 0.2.2-alpha.3); session-list payloads carry this plugin's projection data (the `wire.summary` optimisation exists only from 0.2.2-alpha.2) |
-| 0.1.6-alpha.2 – 0.1.6 | ⚠️ Expected to work (the first builds with external-plugin installation), not verified on a real app |
-| Below 0.1.6-alpha.2 | ❌ No external-plugin installation support; this plugin cannot be installed |
+| 0.2.2-alpha.3 and later | ✅ Everything works (the `engines.dsh` floor) |
+| Below 0.2.2-alpha.3 | ❌ Not supported: the plugin needs the Settings-page slot introduced in that version, and `engines.dsh` blocks installation |
 
-Summary: **0.2.2 or later is recommended**; 0.1.6-alpha.2 is the earliest installable build, but 0.1.6/0.1.7-rc releases are early previews and degrade placement/icons. The older-version conclusions come from static inspection of each package version; only 0.2.2-rc.1 was tested live.
+Summary: **DSH 0.2.2-alpha.3 or later is required** (the `engines.dsh` floor in `package.json`); 0.2.2 or later is recommended. This machine was tested on 0.2.2-rc.1.
 
 ## Privacy and limits
 

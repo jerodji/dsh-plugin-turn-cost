@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { HOLIDAY_RANGES } from '../cost-model.js';
 
 /* ------------------------------------------------------------------ */
 /* fake React (just enough for the footer component)                   */
@@ -869,6 +870,69 @@ await (async () => {
     plugin.settings.write(restoreSettings);
   }
 })();
+
+
+/* ------------------------------------------------------------------ */
+/* 1.0.6 migration helpers: row parsing, scoped selection, store dedupe */
+/* ------------------------------------------------------------------ */
+
+test('panelRowParts splits both zh and en label rows (A5)', () => {
+  const { panelRowParts } = plugin.helpers;
+  const row = (parts) => (parts === undefined ? undefined : [parts.label, parts.value]);
+  assert.deepEqual(row(panelRowParts('标签：¥1.000')), ['标签', '¥1.000']);
+  assert.deepEqual(row(panelRowParts('Label: $1.000')), ['Label', '$1.000']);
+  assert.deepEqual(row(panelRowParts('子代理合计：¥0.1')), ['子代理合计', '¥0.1']);
+  assert.equal(panelRowParts(''), undefined);
+  assert.equal(panelRowParts('：x'), undefined);
+  assert.deepEqual(row(panelRowParts('开头就是全角冒号：x')), ['开头就是全角冒号', 'x']);
+  // A row value may itself contain the separator: split on the first one only.
+  assert.deepEqual(row(panelRowParts('a：b：c')), ['a', 'b：c']);
+  assert.equal(panelRowParts('no separator here'), undefined);
+});
+
+test('select-all only touches visible ids (A8)', () => {
+  const { mergeVisibleSelection } = plugin.helpers;
+  assert.deepEqual(mergeVisibleSelection({ outside: true, keep: true }, ['vis'], true), {
+    outside: true,
+    keep: true,
+    vis: true,
+  });
+  assert.deepEqual(mergeVisibleSelection({ outside: true, vis: true }, ['vis'], false), { outside: true });
+  assert.deepEqual(mergeVisibleSelection(undefined, ['a'], true), { a: true });
+  assert.deepEqual(mergeVisibleSelection({}, [], true), {});
+});
+
+test('store skips identical writes (B5)', () => {
+  const rows = new Map();
+  let writes = 0;
+  const storage = {
+    getItem: (key) => (rows.has(key) ? rows.get(key) : null),
+    setItem: (key, value) => {
+      writes += 1;
+      rows.set(key, String(value));
+    },
+    removeItem: (key) => rows.delete(key),
+  };
+  const store = plugin.store.create({ key: 'test.store.dedupe', storage });
+  const view = viewWith([entry(1)]);
+  store.upsertSession(view);
+  assert.equal(writes, 1, 'first upsert writes');
+  store.upsertSession(view);
+  assert.equal(writes, 1, 'identical upsert is skipped');
+  store.upsertSession(viewWith([entry(1, { costMicro: 3_000_000 })]));
+  assert.equal(writes, 2, 'changed record writes again');
+});
+
+test('client holiday table matches the host table (C1)', () => {
+  const source = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'client.js'), 'utf8');
+  const block = source.match(/const HOLIDAY_RANGES = \[([\s\S]*?)\];/);
+  assert.ok(block, 'client.js must define HOLIDAY_RANGES');
+  const clientRanges = Array.from(block[1].matchAll(/\['(\d{4}-\d{2}-\d{2})', '(\d{4}-\d{2}-\d{2})'\]/g)).map(
+    (match) => [match[1], match[2]],
+  );
+  assert.deepEqual(clientRanges, HOLIDAY_RANGES);
+  assert.match(source, /if \(HOLIDAY_DAYS\.has\(beijingDayKey\(date\)\)\) return false;/);
+});
 
 for (const result of results) {
   if (result.ok) console.log(`PASS  ${result.name}`);

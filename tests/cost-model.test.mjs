@@ -17,6 +17,7 @@ setCnyPriceBook(JSON.parse(fs.readFileSync(new URL('../prices/cny-models.json', 
 import {
   APPROX_CNY_PER_USD,
   COST_MODEL_VERSION,
+  HOLIDAY_RANGES,
   PEAK_PRICES,
   SEARCH_REQUEST_MICRO,
   USD_PEAK_PRICES,
@@ -25,6 +26,7 @@ import {
   createState,
   foldAll,
   foldEvent,
+  isHoliday,
   isPeak,
   resolvePricing,
   setModelNames,
@@ -896,6 +898,73 @@ test('already settled turns keep their frozen amount when the price book changes
   assert.equal(state.turns[1].costMicro, null);
   assert.equal(state.sessionCostMicro, 2_340_000);
   reset();
+});
+
+
+/* ------------------------------------------------------------------ */
+/* statutory holidays                                                   */
+/* ------------------------------------------------------------------ */
+
+test('statutory holidays are off-peak all day (official 2025–2027 table)', () => {
+  assert.equal(HOLIDAY_RANGES.length, 20);
+  const days = new Set();
+  for (const [start, end] of HOLIDAY_RANGES) {
+    const first = Date.parse(`${start}T00:00:00Z`);
+    const last = Date.parse(`${end}T00:00:00Z`);
+    assert.ok(Number.isFinite(first) && Number.isFinite(last) && first <= last, `${start}..${end}`);
+    for (let time = first; time <= last; time += 86_400_000) {
+      days.add(new Date(time).toISOString().slice(0, 10));
+    }
+  }
+  const countByYear = {};
+  for (const day of days) countByYear[day.slice(0, 4)] = (countByYear[day.slice(0, 4)] || 0) + 1;
+  assert.deepEqual(countByYear, { 2025: 28, 2026: 33, 2027: 29 });
+  assert.equal(days.size, 90);
+  for (const day of days) {
+    const year = Number(day.slice(0, 4));
+    const month = Number(day.slice(5, 7));
+    const date = Number(day.slice(8, 10));
+    for (const hour of [0, 9, 10, 12, 14, 15, 18, 23]) {
+      const time = beijing(year, month - 1, date, hour);
+      assert.equal(isHoliday(time), true, `${day} ${hour}:00 must be a holiday`);
+      assert.equal(isPeak(time), false, `${day} ${hour}:00 must be off-peak`);
+    }
+  }
+});
+
+test('holiday boundaries follow the Beijing calendar day', () => {
+  assert.equal(isHoliday(beijing(2025, 0, 1, 0, 0)), true);
+  assert.equal(isHoliday(beijing(2024, 11, 31, 23, 59)), false);
+  assert.equal(isHoliday(beijing(2025, 1, 4, 23, 59)), true);
+  assert.equal(isHoliday(beijing(2025, 1, 5, 0, 0)), false);
+  // 2025-02-05 is a Wednesday after the Spring Festival holiday.
+  assert.equal(isPeak(beijing(2025, 1, 5, 10, 0)), true);
+  // epoch seconds are accepted just like isPeak.
+  assert.equal(isHoliday(Math.floor(beijing(2025, 9, 1, 12, 0) / 1000)), true);
+  assert.equal(isHoliday(0), false);
+  assert.equal(isHoliday(Number.NaN), false);
+});
+
+test('make-up work weekends keep the weekend rule', () => {
+  const makeUpDays = [
+    [2025, 0, 26],
+    [2025, 1, 8],
+    [2026, 1, 14],
+    [2027, 1, 14],
+  ];
+  for (const [year, month, day] of makeUpDays) {
+    const time = beijing(year, month, day, 10, 0);
+    assert.equal(isHoliday(time), false, `${year}-${month}-${day} is not a holiday`);
+    assert.equal(isPeak(time), false, `${year}-${month}-${day} stays off-peak`);
+  }
+});
+
+test('years outside the table fall back to the Monday–Friday rule', () => {
+  assert.equal(isPeak(beijing(2024, 11, 31, 10, 0)), true);
+  assert.equal(isPeak(beijing(2028, 0, 3, 10, 0)), true);
+  assert.equal(isPeak(beijing(2028, 0, 8, 10, 0)), false);
+  assert.equal(isPeak(beijing(2029, 5, 2, 10, 0)), false);
+  assert.equal(isHoliday(beijing(2028, 0, 1, 12, 0)), false);
 });
 
 /* ------------------------------------------------------------------ */

@@ -19,11 +19,16 @@
 import { foldAll, viewOf } from './cost-model.js';
 
 const SESSION_CACHE_TTL_MS = 30_000;
-const ACCOUNT_CACHE_TTL_MS = 30_000;
+/** Bounded fold cache; every Session loaded by the dashboard is one entry. */
+const SESSION_CACHE_LIMIT = 200;
 
 /** Per-Session fold cache: the fold is deterministic, so a short TTL is safe. */
 const sessionCache = new Map();
-let stateCache = { at: 0, data: undefined, busy: undefined };
+/** Independent snapshots: the reminder's balance and the dashboard's full list. */
+const stateCaches = {
+  balance: { at: 0, data: undefined, busy: undefined },
+  full: { at: 0, data: undefined, busy: undefined },
+};
 
 /** Per-parent-Session cache of the `subagents` scope snapshot. */
 const SUBAGENT_CACHE_TTL_MS = 30_000;
@@ -82,7 +87,12 @@ async function sessionSummary(sessionQuery, sessionId, withTurns = false) {
       }))
       .filter((turn) => turn.endedAt > 0);
   }
+  // Refresh the insertion order on every write, then bound the cache.
+  sessionCache.delete(sessionId);
   sessionCache.set(sessionId, { at: Date.now(), value });
+  if (sessionCache.size > SESSION_CACHE_LIMIT) {
+    sessionCache.delete(sessionCache.keys().next().value);
+  }
   return value;
 }
 
@@ -452,30 +462,29 @@ export async function readBillingState(ctx, scope, sessionId) {
   }
 
   const wantFull = scope === 'full';
-  const now = Date.now();
-  const cached = stateCache.data;
-  if (
-    cached !== undefined &&
-    now - stateCache.at < SESSION_CACHE_TTL_MS &&
-    (!wantFull || Array.isArray(cached.sessions))
-  ) {
-    return cached;
-  }
-  if (stateCache.busy !== undefined) {
-    // A cheaper balance read may be in flight; wait for it, then re-evaluate
-    // whether the fuller snapshot is still needed.
+  // Independent cache slots: a balance poll must not evict the dashboard's
+  // full list (and vice versa).
+  const cache = wantFull ? stateCaches.full : stateCaches.balance;
+  const fresh = () => {
+    if (cache.data === undefined) return false;
+    if (Date.now() - cache.at >= SESSION_CACHE_TTL_MS) return false;
+    return !wantFull || Array.isArray(cache.data.sessions);
+  };
+  if (fresh()) return cache.data;
+  if (cache.busy !== undefined) {
+    // Wait for the in-flight read of this same scope, then decide again.
     try {
-      await stateCache.busy;
+      await cache.busy;
     } catch {
       // fall through and retry ourselves
     }
-    return readBillingState(ctx, scope);
+    if (fresh()) return cache.data;
   }
 
-  stateCache.busy = (async () => {
+  const build = (async () => {
     const account = await accountSummary(ctx);
     const full = wantFull ? await buildFullState(ctx) : undefined;
-    const data = {
+    return {
       v: 1,
       priceVersion: 'deepseek-cny-2026-11-11',
       updatedAt: Date.now(),
@@ -484,14 +493,16 @@ export async function readBillingState(ctx, scope, sessionId) {
         ? {}
         : { sessions: full.sessions, workspaces: full.workspaces, totals: full.totals, degraded: full.degraded }),
     };
-    stateCache = { at: Date.now(), data, busy: undefined };
-    return data;
   })();
+  cache.busy = build;
 
   try {
-    return await stateCache.busy;
+    const data = await build;
+    cache.at = Date.now();
+    cache.data = data;
+    return data;
   } finally {
-    stateCache.busy = undefined;
+    if (cache.busy === build) cache.busy = undefined;
   }
 }
 
@@ -499,7 +510,8 @@ export async function readBillingState(ctx, scope, sessionId) {
 export function resetBillingCache() {
   sessionCache.clear();
   subagentCaches.clear();
-  stateCache = { at: 0, data: undefined, busy: undefined };
+  stateCaches.balance = { at: 0, data: undefined, busy: undefined };
+  stateCaches.full = { at: 0, data: undefined, busy: undefined };
 }
 
 function isLoopbackHost(host) {

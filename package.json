@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-turn-cost",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "在每轮对话底部显示本轮与会话累计费用，支持预算/余额提醒、会话计费统计与 Excel 导出；人民币/美元按官方价目表分别计价。",
   "type": "module",
   "exports": {
@@ -67,6 +67,7 @@
     "dsh": ">=0.2.2-alpha.3"
   },
   "scripts": {
-    "check": "node --check client.js && node --check index.js && node --check cost-model.js && node --check billing.js && node --check price-catalog.js && node --check selection-log.js && node --check cny-prices.js"
+    "check": "node --check client.js && node --check index.js && node --check cost-model.js && node --check billing.js && node --check price-catalog.js && node --check selection-log.js && node --check cny-prices.js",
+    "test": "node tests/run-all.mjs"
   }
 }

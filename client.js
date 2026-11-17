@@ -72,6 +72,62 @@ window.__ModuleLoader__.load({
     /** Beijing is UTC+8 all year; peak windows are read in that offset. */
     const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
 
+    /**
+     * Chinese statutory holidays as officially announced by the State Council
+     * (inclusive `YYYY-MM-DD` ranges). Holidays bill at the off-peak rate all day.
+     * Make-up work Saturdays/Sundays are NOT holidays and stay on the weekend rule.
+     * Update this table once a year; years outside it fall back to the Mon–Fri rule.
+     */
+    const HOLIDAY_RANGES = [
+      ['2025-01-01', '2025-01-01'],
+      ['2025-01-28', '2025-02-04'],
+      ['2025-04-04', '2025-04-06'],
+      ['2025-05-01', '2025-05-05'],
+      ['2025-05-31', '2025-06-02'],
+      ['2025-10-01', '2025-10-08'],
+      ['2026-01-01', '2026-01-03'],
+      ['2026-02-15', '2026-02-23'],
+      ['2026-04-04', '2026-04-06'],
+      ['2026-05-01', '2026-05-05'],
+      ['2026-06-19', '2026-06-21'],
+      ['2026-09-25', '2026-09-27'],
+      ['2026-10-01', '2026-10-07'],
+      ['2027-01-01', '2027-01-03'],
+      ['2027-02-05', '2027-02-13'],
+      ['2027-04-03', '2027-04-05'],
+      ['2027-05-01', '2027-05-05'],
+      ['2027-06-09', '2027-06-09'],
+      ['2027-09-15', '2027-09-15'],
+      ['2027-10-01', '2027-10-07'],
+    ];
+
+    const DAY_MS = 86400000;
+    const HOLIDAY_DAYS = (() => {
+      const days = new Set();
+      for (const [start, end] of HOLIDAY_RANGES) {
+        const first = Date.parse(`${start}T00:00:00Z`);
+        const last = Date.parse(`${end}T00:00:00Z`);
+        for (let time = first; time <= last; time += DAY_MS) {
+          days.add(new Date(time).toISOString().slice(0, 10));
+        }
+      }
+      return days;
+    })();
+
+    /** Calendar day of a Beijing-offset instant, `YYYY-MM-DD`. */
+    function beijingDayKey(date) {
+      const pad = (value) => String(value).padStart(2, '0');
+      return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+    }
+
+    function isHoliday(time) {
+      const raw = Number(time);
+      if (!Number.isFinite(raw) || raw <= 0) return false;
+      const stamp = raw < 1e12 ? raw * 1000 : raw;
+      return HOLIDAY_DAYS.has(beijingDayKey(new Date(stamp + BEIJING_OFFSET_MS)));
+    }
+
+    
     /** Local store contract; bump when the persisted shape changes. */
     const STORE_VERSION = 1;
     const STORE_KEY = 'dsh.turn-cost.store.v1';
@@ -392,7 +448,7 @@ window.__ModuleLoader__.load({
         tipMixed: '本轮经过 {count} 个模型路由，按首个路由计价。',
         tipAssumed: '未取到模型路由信息，按 deepseek-flash 估算。',
         tipNote:
-          '按 DeepSeek 官网{currency}价目与本轮结束时间估算；联网搜索/抓取按成功请求 {webPrice}/1000 次计费，仅新版 Search/Fetch API 计入本轮，默认 Messages 搜索走辅助请求、其 token 未计入；法定节假日未剔除，跨峰谷的单轮存在误差。',
+          '按 DeepSeek 官网{currency}价目与本轮结束时间估算；联网搜索/抓取按成功请求 {webPrice}/1000 次计费，仅新版 Search/Fetch API 计入本轮，默认 Messages 搜索走辅助请求、其 token 未计入；法定节假日按内置 2025–2027 年表排除（表外年份按周一至周五近似），跨峰谷的单轮存在误差。',
         tipSessionTitle: '会话累计（{currency}）',
         tipSessionId: '会话 ID：{id}',
         tipSessionTokens: '会话 tokens（已计价轮次）：{tokens}',
@@ -562,7 +618,7 @@ window.__ModuleLoader__.load({
         tipMixed: 'This turn used {count} model routes; priced with the first route.',
         tipAssumed: 'No model route was recorded; estimated with deepseek-flash.',
         tipNote:
-          'Estimated from DeepSeek’s official {currency} price list and this turn’s end time. Web search/fetch bills {webPrice} per 1,000 successful requests and is included only through the new Search/Fetch API; searches in the default Messages mode run inside auxiliary requests whose tokens are not included. Statutory holidays are not subtracted, and a turn spanning peak and off-peak can be off.',
+          'Estimated from DeepSeek’s official {currency} price list and this turn’s end time. Web search/fetch bills {webPrice} per 1,000 successful requests and is included only through the new Search/Fetch API; searches in the default Messages mode run inside auxiliary requests whose tokens are not included. Statutory holidays are excluded via the built-in 2025–2027 table (years outside it fall back to the weekday rule), and a turn spanning peak and off-peak can be off.',
         tipSessionTitle: 'Cumulative session cost ({currency})',
         tipSessionId: 'Session ID: {id}',
         tipSessionTokens: 'Session tokens (priced turns): {tokens}',
@@ -692,6 +748,8 @@ window.__ModuleLoader__.load({
       if (!Number.isFinite(raw) || raw <= 0) return null;
       const stamp = raw < 1e12 ? raw * 1000 : raw;
       const date = new Date(stamp + BEIJING_OFFSET_MS);
+      // Statutory holidays are off-peak all day (make-up work weekends stay off-peak).
+      if (HOLIDAY_DAYS.has(beijingDayKey(date))) return false;
       const day = date.getUTCDay();
       const hour = date.getUTCHours() + date.getUTCMinutes() / 60;
       return day >= 1 && day <= 5 && ((hour >= 9 && hour < 12) || (hour >= 14 && hour < 18));
@@ -1359,12 +1417,26 @@ window.__ModuleLoader__.load({
       whiteSpace: 'pre-wrap',
     };
 
+    /**
+     * Split a dialog line into a label/value row. Chinese rows use '：' and
+     * English rows use ': '; both must be recognized so localized panels keep
+     * their two-column layout.
+     */
+    function panelRowParts(line) {
+      if (typeof line !== 'string' || line === '') return undefined;
+      const fullwidth = line.indexOf('：');
+      if (fullwidth > 0) return { label: line.slice(0, fullwidth), value: line.slice(fullwidth + 1) };
+      const spaced = line.indexOf(': ');
+      if (spaced > 0) return { label: line.slice(0, spaced), value: line.slice(spaced + 2) };
+      return undefined;
+    }
+
     /** Rough height of a dialog body so the side with more room can be chosen. */
     function estimatePanelHeight(lines, viewportHeight) {
       let total = 16 * 2 + 24 + 10; // padding + title row + rule
       for (const line of lines || []) {
         if (line === '') total += 8;
-        else if (line.indexOf('：') > 0) total += 20;
+        else if (panelRowParts(line) !== undefined) total += 20;
         else if (line.length > 24) total += 34;
         else total += 22;
       }
@@ -1461,11 +1533,58 @@ window.__ModuleLoader__.load({
                   : fitsBelow
                     ? false
                     : spaceAbove >= spaceBelow;
+        const room = above ? spaceAbove : spaceBelow;
+        const maxHeight = Math.max(48, Math.min(Math.round(originHeight * 0.7), Math.round(room) - 8));
         return above
-          ? { right, side: 'above', bottom: Math.max(8, originBottom - rect.top + 8) }
-          : { right, side: 'below', top: Math.max(8, rect.bottom - originTop + 8) };
+          ? { right, side: 'above', maxHeight, bottom: Math.max(8, originBottom - rect.top + 8) }
+          : { right, side: 'below', maxHeight, top: Math.max(8, rect.bottom - originTop + 8) };
       } catch {
         return undefined;
+      }
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Minimal dialog accessibility (no layout changes)
+     * ------------------------------------------------------------------ */
+
+    let a11yIdSeq = 0;
+    /** Unique, stable id for `aria-labelledby` (React.useRef keeps it per mount). */
+    function useA11yId(prefix) {
+      const ref = typeof React.useRef === 'function' ? React.useRef(null) : { current: null };
+      if (ref.current === null) {
+        a11yIdSeq += 1;
+        ref.current = `${prefix}-${a11yIdSeq}`;
+      }
+      return ref.current;
+    }
+
+    function focusNode(node) {
+      if (!node || typeof node.focus !== 'function') return;
+      try {
+        node.focus();
+      } catch {
+        // Detached or inert nodes cannot take focus; the dialog still works.
+      }
+    }
+
+    /** Keep Tab / Shift+Tab inside the open dialog. */
+    function trapDialogTab(event) {
+      if (!event || event.key !== 'Tab' || !event.currentTarget) return;
+      const root = event.currentTarget;
+      if (typeof root.querySelectorAll !== 'function') return;
+      const focusable = root.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = typeof document !== 'undefined' ? document.activeElement : undefined;
+      if (event.shiftKey && (active === first || !root.contains(active))) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        focusNode(last);
+      } else if (!event.shiftKey && (active === last || !root.contains(active))) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        focusNode(first);
       }
     }
 
@@ -1612,6 +1731,9 @@ window.__ModuleLoader__.load({
       // Fallback for quota/private-mode failures: the last record we serialized
       // stays readable in memory instead of silently disappearing.
       let memory = blank();
+      // Serialized form of the last successful write: identical projections
+      // (the fold is rebuilt on every render) must not hit storage or notify.
+      let lastSerialized = null;
 
       function read() {
         try {
@@ -1627,11 +1749,23 @@ window.__ModuleLoader__.load({
       }
 
       function write(data) {
-        memory = data;
+        let serialized;
         try {
-          storage.setItem(key, JSON.stringify(data));
+          serialized = JSON.stringify(data);
         } catch {
-          /* quota or private mode: the in-memory copy above keeps it readable */
+          serialized = undefined;
+        }
+        if (serialized !== undefined && serialized === lastSerialized) return;
+        memory = data;
+        if (serialized !== undefined) {
+          try {
+            storage.setItem(key, serialized);
+            // Only remember it once the write succeeded, so a quota failure is
+            // retried by the next write.
+            lastSerialized = serialized;
+          } catch {
+            /* quota or private mode: the in-memory copy above keeps it readable */
+          }
         }
         for (const listener of Array.from(listeners)) {
           try {
@@ -1979,6 +2113,10 @@ window.__ModuleLoader__.load({
       const [settings, setSettings] = React.useState(() => readDisplaySettings());
       const [alignShift, setAlignShift] = React.useState(0);
       const rowRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: null };
+      // Anchor trigger + rendered lines, so the panel can be re-positioned when
+      // the page scrolls or the window resizes while it is open.
+      const panelTriggerRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: null };
+      const panelLinesRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: [] };
 
       const localStore = turnCostStore();
       React.useEffect(() => {
@@ -2033,7 +2171,12 @@ window.__ModuleLoader__.load({
           return undefined;
         }
         const onKeyDown = (event) => {
-          if (event && event.key === 'Escape') setPanel(null);
+          if (!event || event.key !== 'Escape') return;
+          // Claim the key: DSH's double-Esc stop-generation listens on window
+          // and only reacts when the gesture was not default-prevented.
+          if (typeof event.preventDefault === 'function') event.preventDefault();
+          if (typeof event.stopPropagation === 'function') event.stopPropagation();
+          setPanel(null);
         };
         document.addEventListener('keydown', onKeyDown);
         return () => {
@@ -2041,6 +2184,42 @@ window.__ModuleLoader__.load({
             document.removeEventListener('keydown', onKeyDown);
           }
         };
+      }, [panel === null]);
+
+      // The dialog is `position: fixed`, so scrolling the message list or
+      // resizing the window would leave it behind. Re-anchor it while open.
+      React.useEffect(() => {
+        if (panel === null) return undefined;
+        const reposition = () => {
+          const trigger = panelTriggerRef.current;
+          if (!trigger || typeof trigger.getBoundingClientRect !== 'function') return;
+          const pos = panelPosition({ currentTarget: trigger }, panelLinesRef.current || []);
+          setPanel((current) => (current === null ? current : { ...current, pos }));
+        };
+        if (typeof window === 'undefined') return undefined;
+        const hasWindow = typeof window.addEventListener === 'function';
+        if (!hasWindow) return undefined;
+        window.addEventListener('scroll', reposition, true);
+        window.addEventListener('resize', reposition);
+        return () => {
+          if (typeof window.removeEventListener === 'function') {
+            window.removeEventListener('scroll', reposition, true);
+            window.removeEventListener('resize', reposition);
+          }
+        };
+      }, [panel === null]);
+
+      // Dialog accessibility: labelled by its title, focused on open, restored
+      // to the trigger on close.
+      const costDialogId = useA11yId('turn-cost-panel');
+      const costDialogRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: null };
+      React.useEffect(() => {
+        if (panel !== null) {
+          focusNode(costDialogRef.current);
+          return undefined;
+        }
+        focusNode(panelTriggerRef.current);
+        return undefined;
       }, [panel === null]);
 
       // Subagent snapshots: one shared fetch per Session when the badge mounts.
@@ -2245,6 +2424,8 @@ window.__ModuleLoader__.load({
         // bottom-right default.
         const lines = kind === 'turn' ? turnPanelLines : sessionPanelLines;
         const pos = panelPosition(event, lines);
+        if (event && event.currentTarget) panelTriggerRef.current = event.currentTarget;
+        panelLinesRef.current = lines;
         setPanel((current) => (current && current.kind === kind ? null : { kind, pos }));
       };
       const toggleKey = (kind) => (event) => {
@@ -2280,18 +2461,13 @@ window.__ModuleLoader__.load({
         if (line === '') return h('div', { key: `gap-${index}`, style: { height: 8 } });
         // zh rows use a full-width colon; en rows use ": ". Accept both so
         // localized label/value rows (including the subagent section) split.
-        let colon = line.indexOf('：');
-        let separator = 1;
-        if (colon <= 0) {
-          colon = line.indexOf(': ');
-          separator = 2;
-        }
-        if (colon > 0) {
+        const parts = panelRowParts(line);
+        if (parts !== undefined) {
           return h(
             'div',
             { key: `row-${index}`, style: PANEL_ROW },
-            h('span', { style: PANEL_ROW_LABEL }, line.slice(0, colon)),
-            h('span', { style: PANEL_ROW_VALUE }, line.slice(colon + separator)),
+            h('span', { style: PANEL_ROW_LABEL }, parts.label),
+            h('span', { style: PANEL_ROW_VALUE }, parts.value),
           );
         }
         if (line.length <= 24) {
@@ -2405,13 +2581,18 @@ window.__ModuleLoader__.load({
               {
                 key: 'panel',
                 role: 'dialog',
-                'aria-label': dialogTitle,
+                'aria-modal': 'true',
+                'aria-labelledby': costDialogId,
+                tabIndex: -1,
+                ref: costDialogRef,
+                onKeyDown: trapDialogTab,
                 'data-dsh-cost-panel': panel.kind,
                 style: {
                   ...PANEL,
                   position: 'fixed',
                   ...(anchor.top !== undefined ? { top: anchor.top } : { bottom: anchor.bottom }),
                   ...(anchor.left !== undefined ? { left: anchor.left } : { right: anchor.right }),
+                  ...(anchor.maxHeight !== undefined ? { maxHeight: anchor.maxHeight } : {}),
                 },
               },
               h(
@@ -2423,7 +2604,7 @@ window.__ModuleLoader__.load({
                   costPanelIcon(),
                   h(
                     'span',
-                    { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                    { id: costDialogId, style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
                     dialogTitle,
                   ),
                 ),
@@ -2493,6 +2674,8 @@ window.__ModuleLoader__.load({
     /** Shared subagent snapshot cache so many badges / the poll share one fetch. */
     const subagentFetchCache = new Map();
     const SUBAGENT_FETCH_TTL_MS = 10000;
+    /** A hung Host request must fail instead of blocking the overlay forever. */
+    const FETCH_TIMEOUT_MS = 15000;
 
     /** Fetch the Host snapshot (cached briefly so the overlay + page share it). */
     function fetchBillingState(scope, force = false, sessionId = '') {
@@ -2508,9 +2691,17 @@ window.__ModuleLoader__.load({
         typeof sessionId === 'string' && sessionId !== ''
           ? `&sessionId=${encodeURIComponent(sessionId)}`
           : '';
+      const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+      const timer =
+        controller === undefined
+          ? undefined
+          : setTimeout(() => {
+              controller.abort();
+            }, FETCH_TIMEOUT_MS);
       cache.busy = fetch(`${STATE_URL}?scope=${encodeURIComponent(scope)}${suffix}`, {
         headers: { 'x-dsh-turn-cost': '1' },
         cache: 'no-store',
+        ...(controller === undefined ? {} : { signal: controller.signal }),
       })
         .then((response) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -2521,7 +2712,14 @@ window.__ModuleLoader__.load({
           cache.data = data;
           return data;
         })
+        .catch((error) => {
+          if (error && (error.name === 'AbortError' || (controller !== undefined && controller.signal.aborted))) {
+            throw new Error(`Request timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
+          }
+          throw error;
+        })
         .finally(() => {
+          if (timer !== undefined) clearTimeout(timer);
           cache.busy = undefined;
         });
       stateCaches.set(key, cache);
@@ -2608,10 +2806,16 @@ window.__ModuleLoader__.load({
     }
 
     function writeThresholds(next) {
+      // Symmetric with readThresholds: 0/negative/NaN/'' would otherwise be
+      // stored, and a threshold of 0 would warn at every balance.
+      const positive = (input) => {
+        const n = Number(input);
+        return Number.isFinite(n) && n > 0 ? n : null;
+      };
       const currency = next.currency === 'USD' ? 'USD' : next.currency === 'CNY' ? 'CNY' : undefined;
       const value = {
-        cny: next.cny === null || next.cny === undefined ? null : Number(next.cny),
-        usd: next.usd === null || next.usd === undefined ? null : Number(next.usd),
+        cny: positive(next.cny),
+        usd: positive(next.usd),
         currency,
         showTurn: next.showTurn !== false,
         showSession: next.showSession !== false,
@@ -2664,7 +2868,14 @@ window.__ModuleLoader__.load({
     }
 
     /** Wallet totals, refreshed lazily and shared by every footer badge. */
-    const balanceState = { account: undefined, loaded: false, at: 0, busy: undefined, listeners: new Set() };
+    const balanceState = {
+      account: undefined,
+      loaded: false,
+      failed: false,
+      at: 0,
+      busy: undefined,
+      listeners: new Set(),
+    };
 
     /**
      * Right edge of the composer's 预算 pill, published by the composer entry
@@ -2712,13 +2923,18 @@ window.__ModuleLoader__.load({
         (state) => {
           balanceState.account = state && state.account ? state.account : null;
           balanceState.loaded = true;
+          balanceState.failed = false;
           balanceState.busy = undefined;
           publishBalance();
           return balanceState.account;
         },
         () => {
-          balanceState.account = null;
+          // Keep the last loaded account: a transient network failure must not
+          // make the remaining balance vanish. Only a first-ever failure is
+          // rendered as "unavailable".
+          if (!balanceState.loaded) balanceState.account = null;
           balanceState.loaded = true;
+          balanceState.failed = true;
           balanceState.busy = undefined;
           publishBalance();
           return undefined;
@@ -2946,6 +3162,21 @@ window.__ModuleLoader__.load({
         setOpen(false);
       }, [loaded, alertCount, reminder.shown, reminder.mutedUntil]);
 
+      // 「稍后提醒」 only silences until local midnight. Nothing re-renders at
+      // 00:00, so schedule the re-arm explicitly and clear it with the card.
+      React.useEffect(() => {
+        if (!(reminder.mutedUntil > 0)) return undefined;
+        const remaining = reminder.mutedUntil - Date.now();
+        if (!(remaining > 0)) return undefined;
+        const timer = setTimeout(() => {
+          const next = { ...DEFAULT_REMINDER };
+          setReminder(next);
+          writeReminderState(next);
+          setOpen(false);
+        }, Math.min(remaining + 500, 2147483647));
+        return () => clearTimeout(timer);
+      }, [reminder.mutedUntil]);
+
       // Announce the crossing exactly once (persisted, so reloads stay quiet
       // and the card stays visible until it is dismissed).
       React.useEffect(() => {
@@ -2957,6 +3188,31 @@ window.__ModuleLoader__.load({
         writeReminderState(next);
         setOpen(true);
       }, [loaded, alertCount, open, reminder.shown, reminder.mutedUntil]);
+
+      // Esc on the reminder means 「稍后提醒」 (quiet until local midnight), not a
+      // bare dismiss; claim the key so DSH does not treat it as stop-generation.
+      const reminderTitleId = useA11yId('turn-cost-reminder');
+      React.useEffect(() => {
+        if (!open) return undefined;
+        if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') {
+          return undefined;
+        }
+        const onKey = (event) => {
+          if (!event || event.key !== 'Escape') return;
+          if (typeof event.preventDefault === 'function') event.preventDefault();
+          if (typeof event.stopPropagation === 'function') event.stopPropagation();
+          const next = { shown: false, mutedUntil: endOfLocalDay(Date.now()) };
+          setReminder(next);
+          writeReminderState(next);
+          setOpen(false);
+        };
+        document.addEventListener('keydown', onKey);
+        return () => {
+          if (typeof document.removeEventListener === 'function') {
+            document.removeEventListener('keydown', onKey);
+          }
+        };
+      }, [open]);
 
       if (!open || alertCount === 0) return null;
 
@@ -2977,6 +3233,9 @@ window.__ModuleLoader__.load({
         'div',
         {
           'data-dsh-balance-reminder': 'true',
+          role: 'alertdialog',
+          'aria-live': 'assertive',
+          'aria-labelledby': reminderTitleId,
           style: {
             position: 'fixed',
             top: 16,
@@ -2994,7 +3253,11 @@ window.__ModuleLoader__.load({
             pointerEvents: 'auto',
           },
         },
-        h('div', { style: { ...PAGE_TEXT, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, t('reminderTitle')),
+        h(
+          'div',
+          { id: reminderTitleId, style: { ...PAGE_TEXT, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } },
+          t('reminderTitle'),
+        ),
         ...alerts.map((alert) =>
           h(
             'div',
@@ -3134,7 +3397,17 @@ window.__ModuleLoader__.load({
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
-        .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
+        .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, '');
+    }
+
+    /** Excel sheet names: <=31 chars, none of []:*?/\, non-empty. */
+    function excelSheetName(value) {
+      const cleaned = String(value === undefined || value === null ? '' : value)
+        .replace(/[\[\]:*?\/\\]/g, ' ')
+        .trim()
+        .slice(0, 31)
+        .trim();
+      return cleaned === '' ? 'Sheet1' : cleaned;
     }
 
     function excelColumn(index) {
@@ -3337,9 +3610,22 @@ window.__ModuleLoader__.load({
           continue;
         }
         if (row.kind === 'total') continue;
+        // A Session whose log could not be folded still appears, but with an
+        // explicit '—' amount and it never contributes to the total.
+        if (row.error !== undefined && row.error !== null) {
+          sheetRows.push([
+            { value: row.groupTitle || '' },
+            { value: row.title || row.sessionId },
+            { value: row.sessionId },
+            { value: row.time || '' },
+            { value: '—' },
+            { value: Number(row.turns) || 0, number: true },
+          ]);
+          continue;
+        }
         totalMicro += Number(row.amountMicro) || 0;
         sheetRows.push([
-          { value: '' },
+          { value: row.groupTitle || '' },
           { value: row.title },
           { value: row.sessionId },
           { value: row.time || '' },
@@ -3360,7 +3646,7 @@ window.__ModuleLoader__.load({
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-        '<sheets><sheet name="' + xmlEscapeText(labels.sheet) + '" sheetId="1" r:id="rId1"/></sheets></workbook>';
+        '<sheets><sheet name="' + xmlEscapeText(excelSheetName(labels.sheet)) + '" sheetId="1" r:id="rId1"/></sheets></workbook>';
       const workbookRels =
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
@@ -3490,6 +3776,22 @@ window.__ModuleLoader__.load({
       return titled;
     }
 
+    /**
+     * Select-all is scoped to the current time range: only the visible ids are
+     * added/removed, while selections outside the range survive.
+     */
+    function mergeVisibleSelection(current, visibleIds, select) {
+      const next = {};
+      if (current && typeof current === 'object') {
+        for (const id of Object.keys(current)) next[id] = current[id];
+      }
+      for (const id of Array.isArray(visibleIds) ? visibleIds : []) {
+        if (select) next[id] = true;
+        else delete next[id];
+      }
+      return next;
+    }
+
     /** The Settings page entry: 「计费明细统计」. */
     function BillingSettingsSection(props) {
       const t = (key, params) => translate(props.t, key, params);
@@ -3528,7 +3830,11 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         load(false);
-        const timer = setInterval(() => load(false), 30000);
+        const timer = setInterval(() => {
+          // Hidden settings tabs do not need fresh numbers; skip the fetch.
+          if (typeof document !== 'undefined' && document.hidden === true) return;
+          load(false);
+        }, 30000);
         const onSettings = () => setThresholds(readThresholds());
         window.addEventListener(SETTINGS_EVENT, onSettings);
         return () => {
@@ -3542,14 +3848,19 @@ window.__ModuleLoader__.load({
         setDraft(next);
         if (draftTimer.current !== null) clearTimeout(draftTimer.current);
         draftTimer.current = setTimeout(() => {
+          draftTimer.current = null;
+          // Only the two threshold inputs use this debounce. Every other field
+          // may have been written immediately while the timer was pending, so
+          // read the freshest settings instead of the captured `next` snapshot.
+          const latest = readThresholds();
           const written = writeThresholds({
             cny: next.cny === '' ? null : next.cny,
             usd: next.usd === '' ? null : next.usd,
-            currency: next.currency !== undefined ? next.currency : readThresholds().currency,
-            showTurn: next.showTurn !== false,
-            showSession: next.showSession !== false,
-            showBudget: next.showBudget !== false,
-            range: next.range !== undefined ? next.range : readThresholds().range,
+            currency: latest.currency,
+            showTurn: latest.showTurn,
+            showSession: latest.showSession,
+            showBudget: latest.showBudget,
+            range: latest.range,
           });
           setThresholds(written);
         }, 350);
@@ -3630,13 +3941,11 @@ window.__ModuleLoader__.load({
       const allVisibleSelected = () =>
         visibleSessions.length > 0 && visibleSessions.every((session) => selected[session.sessionId] === true);
       const toggleSelectAll = () => {
-        if (allVisibleSelected()) {
-          setSelected({});
-          return;
-        }
-        const next = {};
-        for (const session of visibleSessions) next[session.sessionId] = true;
-        setSelected(next);
+        // Select-all is scoped to the current time range: keep selections that
+        // live outside the visible rows instead of replacing the whole map.
+        const clear = allVisibleSelected();
+        const visibleIds = visibleSessions.map((session) => session.sessionId);
+        setSelected((current) => mergeVisibleSelection(current, visibleIds, !clear));
       };
       const groupSelectionState = (group) => {
         const ids = group.sessions.map((session) => session.sessionId);
@@ -3648,8 +3957,12 @@ window.__ModuleLoader__.load({
         for (const group of groups) {
           const picked = group.sessions.filter((session) => isSelected(session.sessionId));
           if (picked.length === 0) continue;
-          const groupTitle = group.title || t('unknownDir');
-          const groupMicro = picked.reduce((sum, session) => sum + amountMicroIn(session), 0);
+          // Flat mode has no group column at all; every other grouping keeps
+          // the real title and labels an untitled bucket like the page does.
+          const groupTitle = mode === 'flat' ? '' : group.title || t('unknownDir');
+          const groupMicro = picked
+            .filter((session) => !session.error)
+            .reduce((sum, session) => sum + amountMicroIn(session), 0);
           if (mode !== 'flat') rows.push({ kind: 'group', title: groupTitle, amountMicro: groupMicro });
           for (const session of picked) {
             rows.push({
@@ -3660,6 +3973,7 @@ window.__ModuleLoader__.load({
               time: formatSessionTime(session.createdAt),
               amountMicro: amountMicroIn(session),
               turns: session.turns,
+              error: session.error || null,
             });
           }
         }
@@ -4029,10 +4343,11 @@ window.__ModuleLoader__.load({
               ? h('p', { style: HINT }, sessions.length > 0 ? t('emptyRange') : t('empty'))
               : groups.map((group) => {
                   const selection = groupSelectionState(group);
+                  const groupLabel = group.title === '' ? t('unknownDir') : group.title;
                   return h(
                     'div',
                     { key: group.key, style: { display: 'flex', flexDirection: 'column' } },
-                    group.title === ''
+                    mode === 'flat'
                       ? null
                       : h(
                           'div',
@@ -4055,7 +4370,7 @@ window.__ModuleLoader__.load({
                                 element.indeterminate = selection.partial && !selection.all;
                               }
                             },
-                            'aria-label': t('selectGroup', { name: group.title }),
+                            'aria-label': t('selectGroup', { name: groupLabel }),
                             onChange: () => toggleGroupSelection(group),
                             style: {
                               flex: '0 0 auto',
@@ -4074,7 +4389,7 @@ window.__ModuleLoader__.load({
                                   'data-dsh-group-toggle': group.key,
                                   'aria-expanded': collapsedKeys[group.key] === true ? 'false' : 'true',
                                   'aria-label': t(collapsedKeys[group.key] === true ? 'groupExpand' : 'groupCollapse', {
-                                    name: group.title,
+                                    name: groupLabel,
                                   }),
                                   onClick: () => toggleGroup(group.key),
                                   style: {
@@ -4127,13 +4442,9 @@ window.__ModuleLoader__.load({
                                 fontWeight: 600,
                                 color: 'var(--dsw-alias-label-primary)',
                               },
-                              title: group.title,
+                              title: groupLabel,
                             },
-                            mode === 'directory'
-                              ? group.title === ''
-                                ? t('unknownDir')
-                                : group.title
-                              : group.title,
+                            groupLabel,
                           ),
                           h(
                             'span',
@@ -4349,6 +4660,9 @@ window.__ModuleLoader__.load({
       const [, forceRender] = React.useState(0);
       const [panel, setPanel] = React.useState(null);
       const [draft, setDraft] = React.useState('');
+      // Budget being edited, in the active currency, at full precision. Used to
+      // skip the write when the user opens the panel and saves without editing.
+      const [draftBase, setDraftBase] = React.useState(undefined);
       const [hovered, setHovered] = React.useState(null);
       const [error, setError] = React.useState('');
       const [settings, setSettings] = React.useState(() => readDisplaySettings());
@@ -4360,6 +4674,9 @@ window.__ModuleLoader__.load({
       // rather than the viewport alone.
       const [compactLabel, setCompactLabel] = React.useState(false);
       const rootRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: null };
+      // Anchor + rendered lines for re-positioning while the popover is open.
+      const budgetTriggerRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: null };
+      const budgetLinesRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: [] };
 
       React.useEffect(() => {
         const sync = () => forceRender((value) => value + 1);
@@ -4390,7 +4707,12 @@ window.__ModuleLoader__.load({
           return undefined;
         }
         const onKey = (event) => {
-          if (event && event.key === 'Escape') setPanel(null);
+          if (!event || event.key !== 'Escape') return;
+          // Claim the key: DSH's double-Esc stop-generation listens on window
+          // and only reacts when the gesture was not default-prevented.
+          if (typeof event.preventDefault === 'function') event.preventDefault();
+          if (typeof event.stopPropagation === 'function') event.stopPropagation();
+          setPanel(null);
         };
         document.addEventListener('keydown', onKey);
         return () => {
@@ -4399,6 +4721,41 @@ window.__ModuleLoader__.load({
           }
         };
       }, [panel]);
+
+      // The popover is `position: fixed`; follow the pill when the page scrolls
+      // or the window resizes instead of leaving it behind.
+      React.useEffect(() => {
+        if (panel === null) return undefined;
+        const reposition = () => {
+          const trigger = budgetTriggerRef.current;
+          if (!trigger || typeof trigger.getBoundingClientRect !== 'function') return;
+          const pos = panelPosition({ currentTarget: trigger }, budgetLinesRef.current || [], 'above');
+          setPanel((current) => (current === null ? current : { ...current, pos }));
+        };
+        if (typeof window === 'undefined') return undefined;
+        if (typeof window.addEventListener !== 'function') return undefined;
+        window.addEventListener('scroll', reposition, true);
+        window.addEventListener('resize', reposition);
+        return () => {
+          if (typeof window.removeEventListener === 'function') {
+            window.removeEventListener('scroll', reposition, true);
+            window.removeEventListener('resize', reposition);
+          }
+        };
+      }, [panel]);
+
+      // Dialog accessibility: labelled by its title, focused on open, restored
+      // to the 预算 pill on close.
+      const budgetDialogId = useA11yId('turn-cost-budget-panel');
+      const budgetDialogRef = typeof React.useRef === 'function' ? React.useRef(null) : { current: null };
+      React.useEffect(() => {
+        if (panel !== null) {
+          focusNode(budgetDialogRef.current);
+          return undefined;
+        }
+        focusNode(budgetTriggerRef.current);
+        return undefined;
+      }, [panel === null]);
 
       React.useEffect(() => {
         if (typeof window === 'undefined') return undefined;
@@ -4464,8 +4821,18 @@ window.__ModuleLoader__.load({
           ? undefined
           : `${budgetConverted ? '≈' : ''}${money(budgetMicro / 1e6, displayCurrency)}`;
       const costMicro = sessionCostMicro(props, sessionId, displayCurrency);
+      // Compare in the currency the budget was set in: the displayed budget was
+      // converted with the approximate FX rate, while the official price lists
+      // differ per currency. Recomputing the cost with the budget currency's
+      // price list keeps both sides on the same official table.
+      const budgetCostMicro =
+        budget === undefined
+          ? undefined
+          : budget.currency === displayCurrency
+            ? costMicro
+            : sessionCostMicro(props, sessionId, budget.currency);
       const exceeded =
-        budget !== undefined && costMicro !== undefined && budgetMicro !== undefined && costMicro >= budgetMicro;
+        budget !== undefined && budgetCostMicro !== undefined && budgetCostMicro >= budget.micro;
       const remaining = remainingSummary(account);
       const showBalance = remaining !== undefined;
       // The 显示项 toggle used to hide the balance block; since 0.5.7 it
@@ -4497,19 +4864,33 @@ window.__ModuleLoader__.load({
           close();
           return;
         }
-        if (budgetMicro === undefined) setDraft('');
-        else setDraft(String(Math.round((budgetMicro / 1e6) * 100) / 100));
+        if (budgetMicro === undefined) {
+          setDraft('');
+          setDraftBase(undefined);
+        } else {
+          setDraft(String(budgetMicro / 1e6));
+          setDraftBase(budgetMicro / 1e6);
+        }
         setError('');
         // Read geometry eagerly: React nulls `event.currentTarget` before a
         // deferred state updater runs. Composer panels always open upwards,
         // right-aligned to the 预算 pill.
-        const pos = panelPosition(event, [...budgetLines, '', '', ''], 'above');
+        const lines = [...budgetLines, '', '', ''];
+        const pos = panelPosition(event, lines, 'above');
+        if (event && event.currentTarget) budgetTriggerRef.current = event.currentTarget;
+        budgetLinesRef.current = lines;
         setPanel({ pos });
       };
       const save = () => {
         const value = Number(String(draft).replace(',', '.'));
         if (!Number.isFinite(value) || value <= 0) {
           setError(t('budgetInvalid'));
+          return;
+        }
+        // Opening the panel and pressing save without an edit must not rewrite
+        // the stored budget (the seeded draft can be a rounded representation).
+        if (draftBase !== undefined && value === draftBase) {
+          close();
           return;
         }
         writeBudget(sessionId, Math.round(value * 1e6), activeCurrency());
@@ -4539,13 +4920,13 @@ window.__ModuleLoader__.load({
       });
 
       const heading = (line) => {
-        const colon = line.indexOf('：');
-        return colon > 0
+        const parts = panelRowParts(line);
+        return parts !== undefined
           ? h(
               'div',
               { key: line, style: PANEL_ROW },
-              h('span', { style: PANEL_ROW_LABEL }, line.slice(0, colon)),
-              h('span', { style: PANEL_ROW_VALUE }, line.slice(colon + 1)),
+              h('span', { style: PANEL_ROW_LABEL }, parts.label),
+              h('span', { style: PANEL_ROW_VALUE }, parts.value),
             )
           : null;
       };
@@ -4723,19 +5104,29 @@ window.__ModuleLoader__.load({
               {
                 key: 'panel',
                 role: 'dialog',
-                'aria-label': panelTitle,
+                'aria-modal': 'true',
+                'aria-labelledby': budgetDialogId,
+                tabIndex: -1,
+                ref: budgetDialogRef,
+                onKeyDown: trapDialogTab,
                 'data-dsh-budget-panel': 'true',
                 style: {
                   ...PANEL,
                   position: 'fixed',
                   ...(anchor.top !== undefined ? { top: anchor.top } : { bottom: anchor.bottom }),
                   ...(anchor.left !== undefined ? { left: anchor.left } : { right: anchor.right }),
+                  ...(anchor.maxHeight !== undefined ? { maxHeight: anchor.maxHeight } : {}),
                 },
               },
               h(
                 'div',
                 { style: PANEL_TITLE },
-                h('span', { style: PANEL_ICON }, costPanelIcon(), h('span', null, panelTitle)),
+                h(
+                  'span',
+                  { style: PANEL_ICON },
+                  costPanelIcon(),
+                  h('span', { id: budgetDialogId }, panelTitle),
+                ),
                 h('span', { style: PANEL_VALUE }, panelValue),
               ),
               h('div', { style: PANEL_RULE, 'aria-hidden': true }),
@@ -4826,6 +5217,10 @@ window.__ModuleLoader__.load({
         set: (value) => writeThresholds({ ...readThresholds(), currency: value === 'USD' ? 'USD' : 'CNY' }),
       },
       // Pure helpers exposed for the Node test harness (no runtime use).
+      helpers: {
+        panelRowParts,
+        mergeVisibleSelection,
+      },
       subagents: {
         attributeTurn: attributeSubagents,
         aggregateSession: aggregateSubagents,

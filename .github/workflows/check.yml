@@ -14,3 +14,5 @@ jobs:
           node-version: 22
       - name: Syntax check
         run: npm run check
+      - name: Tests
+        run: npm test

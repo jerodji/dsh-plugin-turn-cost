@@ -332,6 +332,62 @@ export const OFF_PEAK_FACTOR = 0.5;
 /** Beijing is UTC+8 all year; peak windows are read in that offset. */
 const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
 
+/**
+ * Chinese statutory holidays as officially announced by the State Council
+ * (inclusive `YYYY-MM-DD` ranges). Holidays bill at the off-peak rate all day.
+ * Make-up work Saturdays/Sundays are NOT holidays and stay on the weekend rule.
+ * Update this table once a year; years outside it fall back to the Mon–Fri rule.
+ */
+export const HOLIDAY_RANGES = [
+  ['2025-01-01', '2025-01-01'],
+  ['2025-01-28', '2025-02-04'],
+  ['2025-04-04', '2025-04-06'],
+  ['2025-05-01', '2025-05-05'],
+  ['2025-05-31', '2025-06-02'],
+  ['2025-10-01', '2025-10-08'],
+  ['2026-01-01', '2026-01-03'],
+  ['2026-02-15', '2026-02-23'],
+  ['2026-04-04', '2026-04-06'],
+  ['2026-05-01', '2026-05-05'],
+  ['2026-06-19', '2026-06-21'],
+  ['2026-09-25', '2026-09-27'],
+  ['2026-10-01', '2026-10-07'],
+  ['2027-01-01', '2027-01-03'],
+  ['2027-02-05', '2027-02-13'],
+  ['2027-04-03', '2027-04-05'],
+  ['2027-05-01', '2027-05-05'],
+  ['2027-06-09', '2027-06-09'],
+  ['2027-09-15', '2027-09-15'],
+  ['2027-10-01', '2027-10-07'],
+];
+
+const DAY_MS = 86400000;
+const HOLIDAY_DAYS = (() => {
+  const days = new Set();
+  for (const [start, end] of HOLIDAY_RANGES) {
+    const first = Date.parse(`${start}T00:00:00Z`);
+    const last = Date.parse(`${end}T00:00:00Z`);
+    for (let time = first; time <= last; time += DAY_MS) {
+      days.add(new Date(time).toISOString().slice(0, 10));
+    }
+  }
+  return days;
+})();
+
+/** Calendar day of a Beijing-offset instant, `YYYY-MM-DD`. */
+function beijingDayKey(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
+export function isHoliday(time) {
+  const raw = Number(time);
+  if (!Number.isFinite(raw) || raw <= 0) return false;
+  const stamp = raw < 1e12 ? raw * 1000 : raw;
+  return HOLIDAY_DAYS.has(beijingDayKey(new Date(stamp + BEIJING_OFFSET_MS)));
+}
+
+
 export function classifyModel(model) {
   const id = String(model || '').toLowerCase();
   if (id.includes('flash')) return 'flash';
@@ -348,6 +404,8 @@ export function isPeak(time) {
   if (!Number.isFinite(raw) || raw <= 0) return null;
   const stamp = raw < 1e12 ? raw * 1000 : raw;
   const date = new Date(stamp + BEIJING_OFFSET_MS);
+  // Statutory holidays are off-peak all day (make-up work weekends stay off-peak).
+  if (HOLIDAY_DAYS.has(beijingDayKey(date))) return false;
   const day = date.getUTCDay();
   const hour = date.getUTCHours() + date.getUTCMinutes() / 60;
   return day >= 1 && day <= 5 && ((hour >= 9 && hour < 12) || (hour >= 14 && hour < 18));
