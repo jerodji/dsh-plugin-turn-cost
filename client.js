@@ -160,6 +160,164 @@ window.__ModuleLoader__.load({
       return value;
     }
 
+
+    /**
+     * Subagent attribution helpers (pure; also exposed on the plugin record for
+     * tests). Child Sessions are separate Sessions, so their priced turns are
+     * matched into a parent turn by turn end time, within the parent turn
+     * window. Attribution is an approximation: a child turn that starts before
+     * and ends after the parent turn boundary is attributed by its end time.
+     */
+    function agentsByIdOf(entries, liveAgents) {
+      const byId = new Map();
+      const remember = (agent) => {
+        if (!agent || typeof agent !== 'object') return;
+        const id = typeof agent.id === 'string' ? agent.id : '';
+        if (id === '') return;
+        const name = typeof agent.name === 'string' ? agent.name.trim() : '';
+        if (name === '') return;
+        if (!byId.has(id)) byId.set(id, name);
+      };
+      if (Array.isArray(entries)) {
+        for (const entry of entries) {
+          if (Array.isArray(entry && entry.agents)) {
+            for (const agent of entry.agents) remember(agent);
+          }
+        }
+      }
+      // `team/member` fires only when a subagent is created or changes state; a
+      // continued run emits nothing, so the Session-level names are the fallback
+      // for turns that carry no announcement of their own.
+      if (Array.isArray(liveAgents)) for (const agent of liveAgents) remember(agent);
+      return byId;
+    }
+
+    /** First display name found, else the child title, else a stable short id. */
+    function subagentNameOf(session, agentsById) {
+      const id = session && typeof session.id === 'string' ? session.id : '';
+      const mapped = agentsById && typeof agentsById.get === 'function' ? agentsById.get(id) : undefined;
+      if (typeof mapped === 'string' && mapped !== '') return mapped;
+      const title = session && typeof session.title === 'string' ? session.title.trim() : '';
+      if (title !== '') return title;
+      return id.slice(0, 8);
+    }
+
+    /** Attribute the subagent turns that ended inside [startedAt, endedAt]. */
+    function attributeSubagents(subagentSessions, agentsById, startedAt, endedAt) {
+      const start = Number(startedAt) || 0;
+      const end = Number(endedAt) > 0 ? Number(endedAt) : Infinity;
+      const items = [];
+      if (start <= 0 || !Array.isArray(subagentSessions)) return items;
+      for (const session of subagentSessions) {
+        if (!session || typeof session !== 'object') continue;
+        const turns = Array.isArray(session.turns) ? session.turns : [];
+        let micro = 0;
+        let priced = 0;
+        let plan = 0;
+        for (const turn of turns) {
+          const ended = Number(turn && turn.endedAt) || 0;
+          if (!(ended > 0) || ended < start || ended > end) continue;
+          if (turn.plan === true) {
+            plan += 1;
+            continue;
+          }
+          const cost = Number(turn.costMicro);
+          if (!Number.isFinite(cost) || cost <= 0) continue;
+          micro += cost;
+          priced += 1;
+        }
+        if (priced === 0 && plan === 0) continue;
+        items.push({
+          id: typeof session.id === 'string' ? session.id : '',
+          name: subagentNameOf(session, agentsById),
+          micro,
+          priced,
+          plan,
+          planOnly: priced === 0 && plan > 0,
+        });
+      }
+      items.sort((a, b) => b.micro - a.micro || String(a.name).localeCompare(String(b.name)));
+      return items;
+    }
+
+    /**
+     * Cross-turn cost per subagent for the Session dialog. `endedAt` cuts the
+     * sum at the badge's parent-turn end so an earlier turn's "本会话" does not
+     * include subagent spend that happened after that turn (0 keeps it open).
+     */
+    function aggregateSubagents(subagentSessions, agentsById, endedAt = 0) {
+      const items = [];
+      if (!Array.isArray(subagentSessions)) return items;
+      const cutoff = Number(endedAt) > 0 ? Number(endedAt) : Infinity;
+      for (const session of subagentSessions) {
+        if (!session || typeof session !== 'object') continue;
+        const turns = Array.isArray(session.turns) ? session.turns : [];
+        let micro = 0;
+        let priced = 0;
+        let plan = 0;
+        for (const turn of turns) {
+          const ended = Number(turn && turn.endedAt) || 0;
+          if (!(ended > 0) || ended > cutoff) continue;
+          if (turn.plan === true) {
+            plan += 1;
+            continue;
+          }
+          const cost = Number(turn.costMicro);
+          if (!Number.isFinite(cost) || cost <= 0) continue;
+          micro += cost;
+          priced += 1;
+        }
+        // A plan-only child counts only when at least one of its turns is in
+        // the window; otherwise an early badge would show a subagent that had
+        // not run yet.
+        if (priced === 0 && plan === 0) continue;
+        const planOnly = micro <= 0;
+        items.push({
+          id: typeof session.id === 'string' ? session.id : '',
+          name: subagentNameOf(session, agentsById),
+          micro,
+          priced,
+          plan,
+          planOnly,
+        });
+      }
+      items.sort((a, b) => b.micro - a.micro || String(a.name).localeCompare(String(b.name)));
+      return items;
+    }
+
+    /** CNY micros -> the active display currency micros (display-only FX). */
+    function subagentMicroIn(currency, micro) {
+      const value = Number(micro) || 0;
+      return (currency || activeCurrency()) === 'USD' ? Math.round(value / APPROX_CNY_PER_USD) : Math.round(value);
+    }
+
+    function subagentAmountText(item, currency) {
+      if (!item || item.planOnly === true) return undefined;
+      return money(subagentMicroIn(currency, item.micro) / 1e6, currency);
+    }
+
+    /** Lines appended after a turn/Session amount detail: rows + total. */
+    function subagentSectionLines(items, t, currency) {
+      if (!Array.isArray(items) || items.length === 0) return [];
+      const active = currency || activeCurrency();
+      const lines = [t('subagentSection', { count: String(items.length) })];
+      let totalMicro = 0;
+      for (const item of items) {
+        let amount = subagentAmountText(item, active);
+        if (amount === undefined) {
+          amount = t('costPlan');
+        } else {
+          totalMicro += subagentMicroIn(active, item.micro);
+        }
+        const name = String(item.name || item.id || '')
+          .replace(/[:：]/g, ' ')
+          .trim();
+        lines.push(t('subagentRow', { name: name === '' ? String(item.id || '').slice(0, 8) : name, amount }));
+      }
+      lines.push(t('subagentTotal', { amount: money(totalMicro / 1e6, active) }));
+      return lines;
+    }
+
     function symbolFor(currency) {
       return (currency || activeCurrency()) === 'USD' ? '$' : '¥';
     }
@@ -181,16 +339,20 @@ window.__ModuleLoader__.load({
         badge: '本轮 {amount}',
         peakTag: '（峰）',
         offPeakTag: '（谷）',
-        session: '会话 {amount}',
-        sessionPartial: '会话 ≥ {amount}',
+        session: '本会话 {amount}',
+        sessionPartial: '本会话 ≥ {amount}',
         panelTitleTurn: '本轮费用明细',
-        panelTitleSession: '会话费用明细',
+        panelTitleSession: '本会话费用明细',
         tipAmountTitle: '金额明细（{currency}）',
         tipAmountHit: '缓存命中输入：{tokens} tokens × {price}/百万 = {amount}',
         tipAmountMiss: '缓存未命中输入：{tokens} tokens × {price}/百万 = {amount}',
         tipAmountWrite: '缓存写入：{tokens} tokens × {price}/百万 = {amount}',
         tipAmountOutput: '输出（含推理）：{tokens} tokens × {price}/百万 = {amount}',
         tipAmountTotal: '本轮金额合计：{amount}',
+        tipAmountTotalWithAgents: '本轮金额合计（含子代理）：{amount}',
+        subagentSection: '子代理（{count}）',
+        subagentRow: '{name}：{amount}',
+        subagentTotal: '子代理合计：{amount}',
         tipTurnId: '轮次 ID：{id}',
         tipModel: '模型：{model}',
         tipPeriod: '计费时段：{period}',
@@ -202,7 +364,7 @@ window.__ModuleLoader__.load({
         costUnknown: '未知',
         costFree: '免费',
         costPlan: '订阅额度',
-        sessionPlanQuota: '会话消耗订阅额度',
+        sessionPlanQuota: '本会话消耗订阅额度',
         planTurn: '本轮消耗订阅额度',
         tipPlanNote: '该模型使用订阅额度计费，无法按 token 计算单轮金额。',
         tipSessionPlan: '订阅额度轮次：{count}',
@@ -235,6 +397,7 @@ window.__ModuleLoader__.load({
         tipSessionId: '会话 ID：{id}',
         tipSessionTokens: '会话 tokens（已计价轮次）：{tokens}',
         tipSessionTotal: '会话合计：{amount}',
+        tipSessionTotalWithSubagents: '本会话合计（含子代理）：{amount}',
         tipSessionWeb: '其中联网工具费：{amount}',
         tipSessionScope: '统计范围：第 1–{turn} 轮，已计价 {priced} 轮',
         tipSessionMissing: '未计价轮次：{turns}',
@@ -346,16 +509,20 @@ window.__ModuleLoader__.load({
         badge: 'This turn {amount}',
         peakTag: '(peak)',
         offPeakTag: '(off-peak)',
-        session: 'Session {amount}',
-        sessionPartial: 'Session ≥ {amount}',
+        session: 'This session {amount}',
+        sessionPartial: 'This session ≥ {amount}',
         panelTitleTurn: 'This turn’s cost',
-        panelTitleSession: 'Session cost',
+        panelTitleSession: 'This session cost',
         tipAmountTitle: 'Cost breakdown ({currency})',
         tipAmountHit: 'Cache-hit input: {tokens} tokens × {price}/M = {amount}',
         tipAmountMiss: 'Cache-miss input: {tokens} tokens × {price}/M = {amount}',
         tipAmountWrite: 'Cache write: {tokens} tokens × {price}/M = {amount}',
         tipAmountOutput: 'Output (incl. reasoning): {tokens} tokens × {price}/M = {amount}',
         tipAmountTotal: 'Turn cost total: {amount}',
+        tipAmountTotalWithAgents: 'Turn cost total (incl. subagents): {amount}',
+        subagentSection: 'Subagents ({count})',
+        subagentRow: '{name}: {amount}',
+        subagentTotal: 'Subagents total: {amount}',
         tipTurnId: 'Turn ID: {id}',
         tipModel: 'Model: {model}',
         tipPeriod: 'Billing period: {period}',
@@ -367,7 +534,7 @@ window.__ModuleLoader__.load({
         costUnknown: 'Unknown',
         costFree: 'Free',
         costPlan: 'Subscription quota',
-        sessionPlanQuota: 'Session consumed subscription quota',
+        sessionPlanQuota: 'This session consumed subscription quota',
         planTurn: 'This turn consumed subscription quota',
         tipPlanNote: 'This model bills a subscription, so the turn has no per-token amount.',
         tipSessionPlan: 'Subscription-quota turns: {count}',
@@ -400,6 +567,7 @@ window.__ModuleLoader__.load({
         tipSessionId: 'Session ID: {id}',
         tipSessionTokens: 'Session tokens (priced turns): {tokens}',
         tipSessionTotal: 'Session total: {amount}',
+        tipSessionTotalWithSubagents: 'Session total (incl. subagents): {amount}',
         tipSessionWeb: 'Includes web-tool fees: {amount}',
         tipSessionScope: 'Range: turns 1–{turn}; {priced} priced',
         tipSessionMissing: 'Unpriced turns: {turns}',
@@ -943,15 +1111,21 @@ window.__ModuleLoader__.load({
       return lines;
     }
 
-    function describeSession(session, t) {
+    function describeSession(session, t, extra) {
       const amount =
         session.amountText !== undefined
           ? `${session.partial ? '≥ ' : ''}${session.amountText}`
           : `${session.partial ? '≥ ' : ''}${session.approx ? '≈' : ''}${money(session.sum)}`;
+      const withSubagents =
+        extra !== undefined && extra !== null && (extra.withSubagents === true || (Array.isArray(extra.subagentLines) && extra.subagentLines.length > 0));
+      const totalText =
+        extra !== undefined && extra !== null && typeof extra.totalAmountText === 'string' && extra.totalAmountText !== ''
+          ? extra.totalAmountText
+          : amount;
       const lines = [
         t('tipSessionTitle', { currency: currencyName() }),
         t('tipSessionTokens', { tokens: group(session.tokens) }),
-        t('tipSessionTotal', { amount }),
+        t(withSubagents ? 'tipSessionTotalWithSubagents' : 'tipSessionTotal', { amount: totalText }),
         t('tipSessionScope', { turn: session.total, priced: session.priced }),
       ];
       if (Number(session.free) > 0) lines.splice(3, 0, t('tipSessionFree', { count: group(session.free) }));
@@ -959,13 +1133,19 @@ window.__ModuleLoader__.load({
       if (Number(session.webFee) > 0) lines.splice(3, 0, t('tipSessionWeb', { amount: money(session.webFee) }));
       if (session.sessionId) lines.push(t('tipSessionId', { id: session.sessionId }));
       if (session.partial) lines.push(t('tipSessionMissing', { turns: summarizeTurns(session.missing, t) }));
+      // Subagent rows sit before the scope note, so the dialog's total line and
+      // this breakdown describe the same number.
+      if (withSubagents && Array.isArray(extra.subagentLines) && extra.subagentLines.length > 0) {
+        lines.push('', ...extra.subagentLines);
+      }
       lines.push(t('tipSessionNote', {}));
       return lines;
     }
 
     /** Per-bucket money breakdown of one turn: tokens × unit price = amount. */
-    function turnAmountLines(detail, t) {
+    function turnAmountLines(detail, t, subagentMicro = 0) {
       if (!detail) return [];
+      const extraMicro = Math.max(0, Number(subagentMicro) || 0);
       if (detail.status === 'unknown') {
         return [
           t('tipAmountTitle', { currency: currencyName() }),
@@ -1033,7 +1213,13 @@ window.__ModuleLoader__.load({
         }
         if (web.messages > 0) lines.push(t('tipWebMessages', { count: group(web.messages) }));
       }
-      lines.push(t('tipAmountTotal', { amount: approx + money(detail.total) }));
+      const ownMicro = Number(detail.total) || 0;
+      const totalKey = extraMicro > 0 ? 'tipAmountTotalWithAgents' : 'tipAmountTotal';
+      lines.push(
+        t(totalKey, {
+          amount: extraMicro > 0 ? money(ownMicro + extraMicro / 1e6) : approx + money(detail.total),
+        }),
+      );
       return lines;
     }
 
@@ -1857,6 +2043,36 @@ window.__ModuleLoader__.load({
         };
       }, [panel === null]);
 
+      // Subagent snapshots: one shared fetch per Session when the badge mounts.
+      // DSH publishes the turn-tail node at `turn/end`, so a mounted badge is
+      // already a finished turn; its attribution window is closed and polling
+      // would only re-read child logs for data that can no longer change.
+      const [subagentSessions, setSubagentSessions] = React.useState(undefined);
+      React.useEffect(() => {
+        let alive = true;
+        if (typeof sessionId !== 'string' || sessionId === '' || typeof fetch !== 'function') {
+          setSubagentSessions(undefined);
+          return () => {
+            alive = false;
+          };
+        }
+        const load = () => {
+          fetchSubagents(sessionId)
+            .then((data) => {
+              if (!alive) return;
+              setSubagentSessions(data && Array.isArray(data.sessions) ? data.sessions : undefined);
+            })
+            .catch(() => {
+              // An older Host does not implement this scope: hide silently.
+              if (alive) setSubagentSessions(undefined);
+            });
+        };
+        load();
+        return () => {
+          alive = false;
+        };
+      }, [sessionId]);
+
       const turn = props.turn;
       if (!turn || !turn.data || typeof turn.data.get !== 'function') return null;
 
@@ -1872,7 +2088,6 @@ window.__ModuleLoader__.load({
       // 1. Host projection: complete per-turn record folded from the log.
       let turnLines;
       let turnFootLines;
-      let sessionLines;
       let turnText;
       let session;
       let turnDetail;
@@ -1889,7 +2104,6 @@ window.__ModuleLoader__.load({
         const built = projectionTooltip(row, t);
         turnLines = built.turnLines;
         turnFootLines = built.turnFootLines;
-        sessionLines = built.sessionLines;
         turnText = built.turnText;
         session = built.session;
         turnDetail = built.detail;
@@ -1901,7 +2115,6 @@ window.__ModuleLoader__.load({
         const info = usage !== undefined && totalTokens > 0 ? detailFor(usage, tail && tail.time) : undefined;
         turnLines = [];
         turnFootLines = [];
-        sessionLines = [];
         turnText = undefined;
         session = undefined;
         turnDetail = undefined;
@@ -1921,12 +2134,35 @@ window.__ModuleLoader__.load({
             store === undefined
               ? undefined
               : cumulativeFor(store, timeline, ownTurn, tail, info, t);
-          if (session !== undefined) {
-            session.sessionId = sessionId;
-            sessionLines = describeSession(session, t);
-          }
+          if (session !== undefined) session.sessionId = sessionId;
         }
       }
+
+      // Subagent attribution (approximate): a subagent is a separate Session,
+      // so its priced turns are matched into this turn by their END time. The
+      // live (running) turn has no projection row yet; its window opens at the
+      // tail timestamp and stays open (endedAt = 0 -> Infinity).
+      const currencyNow = activeCurrency();
+      const liveAgents = projection && Array.isArray(projection.agents) ? projection.agents : undefined;
+      const sessionAgents = agentsByIdOf(entries, liveAgents);
+      const ownAgents = row !== undefined ? agentsByIdOf([row.own], liveAgents) : sessionAgents;
+      const subagentStart =
+        row !== undefined
+          ? Number(row.own.startedAt) || 0
+          : turnDetail !== undefined
+            ? Number(tail && tail.time) || 0
+            : 0;
+      const subagentEnd = row !== undefined ? Number(row.own.endedAt) || 0 : 0;
+      // The Session pill is cumulative up to THIS turn, so only subagent turns
+      // that had already ended when this turn ended are counted. Otherwise every
+      // historical badge would include subagent spend from later turns.
+      const sessionCutoff = row !== undefined ? Number(row.own.endedAt) || 0 : Number(tail && tail.time) || 0;
+      const turnSubagents = attributeSubagents(subagentSessions, ownAgents, subagentStart, subagentEnd);
+      const sessionSubagents = aggregateSubagents(subagentSessions, sessionAgents, sessionCutoff);
+      let subagentTurnMicro = 0;
+      for (const item of turnSubagents) if (!item.planOnly) subagentTurnMicro += subagentMicroIn(currencyNow, item.micro);
+      let subagentSessionMicro = 0;
+      for (const item of sessionSubagents) if (!item.planOnly) subagentSessionMicro += subagentMicroIn(currencyNow, item.micro);
 
       const showTurn = settings.showTurn !== false;
       const showSession = settings.showSession !== false;
@@ -1934,13 +2170,31 @@ window.__ModuleLoader__.load({
       const hasSession = showSession && session !== undefined;
       if (!hasTurn && !hasSession) return null;
 
+      const ownStatus = row !== undefined ? statusOf(row.own) : 'priced';
+      const turnSubagentLines = subagentSectionLines(turnSubagents, t, currencyNow);
       const turnPanelLines =
         turnDetail === undefined
           ? []
-          : [...turnLines, '', ...turnAmountLines(turnDetail, t), '', ...turnFootLines];
-      const sessionPanelLines = session === undefined ? [] : sessionLines;
+          : [
+              ...turnLines,
+              '',
+              ...turnAmountLines(turnDetail, t, ownStatus === 'plan' ? 0 : subagentTurnMicro),
+              ...(turnSubagentLines.length > 0 ? ['', ...turnSubagentLines] : []),
+              '',
+              ...turnFootLines,
+            ];
       const tag = periodTag(t, tagPeriod);
-      const ownStatus = row !== undefined ? statusOf(row.own) : 'priced';
+      // The turn button includes the subagent turns attributed to this turn.
+      const turnTotalText =
+        turnText === undefined
+          ? undefined
+          : ownStatus === 'plan' || subagentTurnMicro <= 0
+            ? turnText
+            : row !== undefined
+              ? `${approxPrefix(row.own, currencyNow)}${money(((Number(row.ownMicro) || 0) + subagentTurnMicro) / 1e6, currencyNow)}`
+              : turnDetail !== undefined && turnDetail.status === 'priced'
+                ? `${turnDetail.approx ? '≈' : ''}${money((Math.round(shownOf(turnDetail).value * 1e6) + subagentTurnMicro) / 1e6, currencyNow)}`
+                : turnText;
       // The peak/off-peak marker belongs to the model label now; the turn
       // button keeps the plain amount.
       const turnLabel =
@@ -1948,20 +2202,39 @@ window.__ModuleLoader__.load({
           ? undefined
           : ownStatus === 'plan'
             ? t('planTurn')
-            : t('badge', { amount: turnText });
-      const sessionAmountText =
+            : t('badge', { amount: turnTotalText });
+      // The Session pill includes every subagent's priced turns (cross-turn);
+      // a plan-only Session with priced subagents therefore shows an amount.
+      let sessionAmountText =
         session === undefined
           ? ''
           : session.amountText !== undefined
             ? session.amountText
             : `${session.approx ? '≈' : ''}${money(session.sum)}`;
+      if (session !== undefined && subagentSessionMicro > 0) {
+        const ownValue = session.planOnly ? 0 : Number(session.sum) || 0;
+        sessionAmountText = `${session.approx && !session.planOnly ? '≈' : ''}${money(ownValue + subagentSessionMicro / 1e6, currencyNow)}`;
+      }
+      const sessionPlanOnly = session !== undefined && session.planOnly === true && subagentSessionMicro <= 0;
+      const sessionBoundPrefix = session === undefined ? '' : session.partial ? '≥ ' : '';
+      // One Session dialog: the total line and the subagent breakdown describe
+      // the same combined number (own priced spend + attributed subagent spend).
+      const sessionSubagentLines = subagentSectionLines(sessionSubagents, t, currencyNow);
+      const sessionPanelLines =
+        session === undefined
+          ? []
+          : describeSession(session, t, {
+              withSubagents: subagentSessionMicro > 0 || sessionSubagentLines.length > 0,
+              totalAmountText: `${sessionBoundPrefix}${sessionAmountText}`,
+              subagentLines: sessionSubagentLines,
+            });
 
       const modelParts = row !== undefined ? modelPartsOf(row.own, row.storedOwn) : undefined;
 
       const sessionLabel =
         session === undefined
           ? undefined
-          : session.planOnly
+          : sessionPlanOnly
             ? t('sessionPlanQuota')
             : t(session.partial ? 'sessionPartial' : 'session', { amount: sessionAmountText });
       const openPanelAt = (kind, event) => {
@@ -1994,22 +2267,31 @@ window.__ModuleLoader__.load({
               ? ''
               : ownStatus === 'plan'
                 ? t('costPlan')
-                : turnText
+                : turnTotalText
             : session === undefined
               ? ''
-              : `${session.partial ? '≥ ' : ''}${sessionAmountText}`;
+              : sessionPlanOnly
+                ? t('costPlan')
+                : `${sessionBoundPrefix}${sessionAmountText}`;
 
       // Same body treatment as the shipped usage dialog: label/value rows,
       // with section headings and plain notes.
       const dialogRows = dialogLines.map((line, index) => {
         if (line === '') return h('div', { key: `gap-${index}`, style: { height: 8 } });
-        const colon = line.indexOf('：');
+        // zh rows use a full-width colon; en rows use ": ". Accept both so
+        // localized label/value rows (including the subagent section) split.
+        let colon = line.indexOf('：');
+        let separator = 1;
+        if (colon <= 0) {
+          colon = line.indexOf(': ');
+          separator = 2;
+        }
         if (colon > 0) {
           return h(
             'div',
             { key: `row-${index}`, style: PANEL_ROW },
             h('span', { style: PANEL_ROW_LABEL }, line.slice(0, colon)),
-            h('span', { style: PANEL_ROW_VALUE }, line.slice(colon + 1)),
+            h('span', { style: PANEL_ROW_VALUE }, line.slice(colon + separator)),
           );
         }
         if (line.length <= 24) {
@@ -2204,22 +2486,29 @@ window.__ModuleLoader__.load({
     const TIME_RANGES = ['today', '7d', '30d', '90d', '180d', '365d', 'all'];
     const TIME_RANGE_DAYS = { '7d': 7, '30d': 30, '90d': 90, '180d': 180, '365d': 365 };
 
-    const stateCache = { at: 0, data: undefined, scope: undefined, busy: undefined, busyScope: undefined };
+    /** Per-scope (and per-Session for `subagents`) response cache. */
+    const stateCaches = new Map();
+    const STATE_CACHE_TTL_MS = 15000;
+    const STATE_CACHE_LIMIT = 20;
+    /** Shared subagent snapshot cache so many badges / the poll share one fetch. */
+    const subagentFetchCache = new Map();
+    const SUBAGENT_FETCH_TTL_MS = 10000;
 
     /** Fetch the Host snapshot (cached briefly so the overlay + page share it). */
-    function fetchBillingState(scope, force = false) {
+    function fetchBillingState(scope, force = false, sessionId = '') {
+      const key = `${scope}:${typeof sessionId === 'string' ? sessionId : ''}`;
       const now = Date.now();
-      if (!force && stateCache.data !== undefined && stateCache.scope === scope && now - stateCache.at < 15000) {
-        return Promise.resolve(stateCache.data);
+      let cache = stateCaches.get(key);
+      if (cache !== undefined && !force && cache.data !== undefined && now - cache.at < STATE_CACHE_TTL_MS) {
+        return Promise.resolve(cache.data);
       }
-      if (stateCache.busy !== undefined) {
-        if (stateCache.busyScope === scope) return stateCache.busy;
-        // Another surface is fetching a different depth; wait, then make sure
-        // the data we render matches the depth this caller asked for.
-        return stateCache.busy.catch(() => {}).then(() => fetchBillingState(scope, force));
-      }
-      stateCache.busyScope = scope;
-      stateCache.busy = fetch(`${STATE_URL}?scope=${scope}`, {
+      if (cache !== undefined && cache.busy !== undefined) return cache.busy;
+      if (cache === undefined) cache = { at: 0, data: undefined, busy: undefined };
+      const suffix =
+        typeof sessionId === 'string' && sessionId !== ''
+          ? `&sessionId=${encodeURIComponent(sessionId)}`
+          : '';
+      cache.busy = fetch(`${STATE_URL}?scope=${encodeURIComponent(scope)}${suffix}`, {
         headers: { 'x-dsh-turn-cost': '1' },
         cache: 'no-store',
       })
@@ -2228,15 +2517,60 @@ window.__ModuleLoader__.load({
           return response.json();
         })
         .then((data) => {
-          stateCache.at = Date.now();
-          stateCache.scope = scope;
-          stateCache.data = data;
+          cache.at = Date.now();
+          cache.data = data;
           return data;
         })
         .finally(() => {
-          stateCache.busy = undefined;
+          cache.busy = undefined;
         });
-      return stateCache.busy;
+      stateCaches.set(key, cache);
+      // Bound the number of cached scopes/parents; the oldest idle entry goes.
+      if (stateCaches.size > STATE_CACHE_LIMIT) {
+        for (const [oldKey, oldCache] of stateCaches) {
+          if (oldKey !== key && oldCache.busy === undefined) {
+            stateCaches.delete(oldKey);
+            break;
+          }
+        }
+      }
+      return cache.busy;
+    }
+
+    /**
+     * Shared per-Session subagent snapshot. Several badges (and the 30s poll)
+     * share one in-flight request; a failure is not cached so it can retry.
+     */
+    function fetchSubagents(sessionId) {
+      if (typeof fetch !== 'function') return Promise.resolve(undefined);
+      const id = typeof sessionId === 'string' ? sessionId : '';
+      if (id === '') return Promise.resolve(undefined);
+      const now = Date.now();
+      const cached = subagentFetchCache.get(id);
+      if (cached !== undefined && cached.data !== undefined && now - cached.at < SUBAGENT_FETCH_TTL_MS) {
+        return Promise.resolve(cached.data);
+      }
+      if (cached !== undefined && cached.promise !== undefined) return cached.promise;
+      const entry = { at: 0, data: undefined, promise: undefined };
+      entry.promise = fetchBillingState('subagents', false, id)
+        .then((data) => {
+          entry.at = Date.now();
+          entry.data = data;
+          return data;
+        })
+        .catch((error) => {
+          subagentFetchCache.delete(id);
+          throw error;
+        })
+        .finally(() => {
+          entry.promise = undefined;
+        });
+      subagentFetchCache.set(id, entry);
+      if (subagentFetchCache.size > STATE_CACHE_LIMIT) {
+        const oldest = subagentFetchCache.keys().next();
+        if (!oldest.done && oldest.value !== id) subagentFetchCache.delete(oldest.value);
+      }
+      return entry.promise;
     }
 
     function readThresholds() {
@@ -4491,6 +4825,14 @@ window.__ModuleLoader__.load({
         webRequestPrice,
         set: (value) => writeThresholds({ ...readThresholds(), currency: value === 'USD' ? 'USD' : 'CNY' }),
       },
+      // Pure helpers exposed for the Node test harness (no runtime use).
+      subagents: {
+        attributeTurn: attributeSubagents,
+        aggregateSession: aggregateSubagents,
+        agentsOf: agentsByIdOf,
+        nameOf: subagentNameOf,
+      },
+      dictionaries: DICTIONARIES,
       apply(ctx) {
         // Amounts follow the UI language; capture the locale face first.
         try {

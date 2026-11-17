@@ -17,8 +17,8 @@ DeepSeek-V4.1-Flash High （谷）  本轮 ¥0.189    会话 ¥1.048
 
 数字为右对齐小字，**「本轮」和「会话」是两个独立的点击目标**（无悬停提示，键盘 Enter/空格等同点击）。各自弹出一个与官方「用量 1.4M tok」面板同款样式的浮层卡片：
 
-- 点「本轮」：面板分两段——**Token 统计**（轮次 ID、模型、峰谷时段、本轮 tokens 总数与各计费桶 token 数，不含任何金额）和**金额明细**（每个桶 `tokens × 单价 = 金额`，末行本轮金额合计）；本轮用过联网工具时，合计前会多出「联网搜索 N 次 / 网页抓取 M 次」行，新版 Search/Fetch API 模式下列出按次费用。计价说明放在金额明细下方。
-- 点「会话」：保留原有会话明细（已计价 tokens、会话合计、统计范围、未计价轮次、会话 ID、备注），**不展示各轮金额列表**；会话内产生过联网工具费时，合计下方多一行「其中联网工具费 ¥x」。
+- 点「本轮」：面板分两段——**Token 统计**（轮次 ID、模型、峰谷时段、本轮 tokens 总数与各计费桶 token 数，不含任何金额）和**金额明细**（每个桶 `tokens × 单价 = 金额`，末行本轮金额合计）；本轮用过联网工具时，合计前会多出「联网搜索 N 次 / 网页抓取 M 次」行，新版 Search/Fetch API 模式下列出按次费用。计价说明放在金额明细下方。本轮若由子代理协作完成，合计会加上归入本轮的已结束子代理花费，并在合计后多出「子代理（N）」分段：逐个子代理列出名字与金额，末行「子代理合计」；订阅套餐类子代理显示「订阅额度」、不计入合计。
+- 点「会话」：保留原有会话明细（已计价 tokens、会话合计、统计范围、未计价轮次、会话 ID、备注），**不展示各轮金额列表**；会话内产生过联网工具费时，合计下方多一行「其中联网工具费 ¥x」。会话合计包含**截至本轮结束前已结束**的全部子代理（同一子代理跨多轮合并）已计价花费，弹窗列出「子代理（N）」及各子代理的跨轮合计，且「本会话合计（含子代理）」与分段之和一致；因此历史轮次的会话金额同样固定不变。
 
 点背景遮罩或按 Esc 关闭；同时只开一个面板。
 
@@ -173,6 +173,25 @@ localStorage 记录按会话分组、轮次以 `id` 为键，便于按会话 ID 
 
 客观限制：DSH 的 llm 服务不暴露「套餐周期（月/季/年）」与实时额度用量，所以文案统一为「订阅额度」；同一提供方同时支持两种接入时，以实际存储的凭据类型为准；切换凭据后需要重启宿主才会重新分类。分类结果会写入宿主日志（`turn-cost: subscription-plan providers …`）。`COST_MODEL_VERSION` 9 会让旧投影缓存失效并重放一次（1.4.3 修正：不再按 id 形状误判套餐）；1.4.6 升到 10 让 GLM 官方人民币价目重算历史轮次；1.5.0 升到 11，国产模型价格改读本地 `prices/cny-models.json` 并重算历史。
 
+### 子代理花费（1.6.0）
+
+子代理（`subagent`）运行在独立会话里，按各自轮次计费；父会话通过会话日志中的 `team/member` 事件获知成员（`data.member.id` 为子会话 ID，`name` 为成员名）。`cost-model.js` 折叠该事件时会维护两份成员表：
+
+- **本轮成员**（写进该轮 `entry.agents`）：仅当事件发生在该轮进行中时记录，按首次出现顺序；
+- **会话成员**（写进投影 `agents`）：整段会话按 id 去重、以最新名字覆盖。team/member 只在子代理创建/状态变化时出现，续跑（例如用 `send_message` 继续）不会重新发事件，因此续跑的轮次靠会话级成员表仍能取到名字。
+
+浏览器半边按下列口径展示：
+
+- **本轮金额** = 本轮自身金额 + 归入本轮的已结束子代理轮次金额。归因规则：子代理轮次的**结束时间**落在父轮 `[startedAt, endedAt]` 窗口内即计入。DSH 在本轮结束后才发布轮尾节点，所以徽标出现时窗口已闭合、金额随即固定；同一会话的多个徽标共享一次请求（浏览器缓存 10 秒、宿主缓存 30 秒）。
+- **会话金额** = 父会话自身截至该轮的各轮 + 本会话内**在该轮结束前已结束**的子代理（含更深层后代）已计价轮次；同一子代理跨多轮的金额在会话弹窗里合并为一行「该子代理合计」，弹窗的「本会话合计（含子代理）」与分段之和一致。
+- **名字优先级**：本轮成员 → 会话成员（续跑也能取名）→ 子会话标题 → 会话 ID 前 8 位。子代理会话的标题是提示词前缀，通常不好看，所以成员名优先。
+- **套餐 / 未知**：套餐类子代理轮次显示「订阅额度」，不计入金额合计；未知价格或没有精确用量的子代理轮次不计入金额，与父会话自身的口径一致。
+- 父会话「本会话」按钮数字仍只统计本会话自身轮次 **加上** 上述子代理花费；子代理自己的会话在设置页账单里独立成行，不会重复计入父会话行。
+
+宿主路由：`GET /api/turn-cost/state?scope=subagents&sessionId=<父会话 ID>` 用 `listSessions()` 的会话头（`parentSession`）找出全部后代子会话，再逐个复用与页面相同的折叠逻辑，返回每个子代理会话的 `id` / `title` / `origin` / `delegationDepth` / `createdAt` / `costMicro` / `costUsdMicro` / `planOnly` 与已结束轮次 `{turn, startedAt, endedAt, costMicro, plan}`；缺少或非法 `sessionId` 返回 400。结果缓存 30 秒，与 `balance` / `full` 的缓存互相独立。
+
+已知局限：归因按子代理轮次的结束时间近似，官方账单不会按父轮拆分；子代理在本轮结束后才结束的轮次会归入下一轮；子代理会话标题不可控且部分成员没有 name。金额仍为估算，以 DeepSeek 官方账单为准。
+
 ### 第三方模型、未知与免费（1.1.0）
 
 计价按**模型提供方**区分（宿主记录每轮的 `provider`）：
@@ -263,6 +282,8 @@ DeepSeek 不使用该文件，继续使用上面的内置官方人民币 / 美�
 - **联网搜索 / 抓取**：新版 Search/Fetch API 按**成功请求** ¥5 / 1,000 次（≈ ¥0.005/次）计费，这笔费用计入本轮金额并在金额明细里单列；只按工具调用参数里的**去重查询数**计次，`isError` 的调用不计。默认的 **Messages 搜索**走辅助 Messages 请求、按 token 计费，但日志不记录其 usage，因此不计按次费，只在面板上标注「辅助 Messages 搜索 N 次（token 未计入）」。默认 `web_fetch` 是本地抓取，免费。
 - 联网工具费为 **0.7.0** 新增：面板上始终显示本轮「搜索 N 次 / 抓取 M 次」（用户选定的方案 A），只有 API 模式才折算成金额并入合计，因此既不会把免费模式算贵，也不会把 API 模式漏掉。
 - 金额显示：≥ ¥0.01 保留 3 位小数（如 `¥0.041`、`¥1.255`），< ¥0.01 保留 2 位有效数字（如 `¥0.008`、`¥0.00042`），小于 ¥0.000001 显示 `<¥0.000001`。
+- **子代理花费为近似归因**：子代理在独立会话中按自身轮次计费；父会话按「子代理轮次的结束时间落在父轮窗口内」归入该父轮，同一子代理跨多轮在会话合计中累加（截至该轮结束）。徽标在本轮结束后才出现，金额固定。官方账单不会按父轮拆分，单轮数字可能与官方明细不同。
+- 折叠记录 `team/member`（子代理成员）：会话级 `agents` 按 id 去重、最新名字覆盖；当前轮另存 `open.agents`，结束轮写入 `entry.agents`。投影视图额外输出会话级 `agents` 与当前轮的 `open`，浏览器据此显示子代理名字。
 
 ### 联网工具费的边界（已知局限）
 
@@ -281,10 +302,10 @@ DeepSeek 不使用该文件，继续使用上面的内置官方人民币 / 美�
 
 ## 实现
 
-- **宿主半边** `index.js`：`inject = ['sessionProjections']`，`apply` 注册 `turnCost` 投影（`stateVersion` 跟随 `COST_MODEL_VERSION`（现为 7），`wire.summary: false`，不进入会话列表汇总）。投影状态 `{sessionId, title, turns[], open, sessionCostMicro, sessionTokens, sessionWeb, webMode, missingTurns, inheritedEventCount}` 由 `cost-model.js` 的纯函数折叠得到，可离线单测。折叠除 `assistant/message` 的 usage 外，还消费 `tool/call` / `tool/result`（统计 `web_search` / `web_fetch` 的成功请求数）与 `web/deepseek-search-llm-request`（统计辅助 Messages 搜索数），据此推断本轮走的是新版 API 还是默认 Messages 搜索。
+- **宿主半边** `index.js`：`inject = ['sessionProjections']`，`apply` 注册 `turnCost` 投影（`stateVersion` 跟随 `COST_MODEL_VERSION`（现为 12），`wire.summary: false`，不进入会话列表汇总）。投影状态 `{sessionId, title, turns[], open, sessionCostMicro, sessionTokens, sessionWeb, webMode, missingTurns, inheritedEventCount}` 由 `cost-model.js` 的纯函数折叠得到，可离线单测。折叠除 `assistant/message` 的 usage 外，还消费 `tool/call` / `tool/result`（统计 `web_search` / `web_fetch` 的成功请求数）与 `web/deepseek-search-llm-request`（统计辅助 Messages 搜索数），据此推断本轮走的是新版 API 还是默认 Messages 搜索。
 - **浏览器半边** `client.js`：通过 `conversation.chat.turnTail` 插槽（顺序 30）渲染，不替换任何内置 UI；读取 `useProjection('turnCost')`，并镜像到 localStorage（每条轮次记录含 `peak` 与 `period` 峰谷桶，加载时直接读取）；只 `require('react')` 基线模块，文案走 Client locale 服务（内置 `zh` / `en`），样式只用 `--dsw-alias-*` 主题变量，不写 DOM、不注入全局样式。
 - 会话列表不包含本投影（`summary:false`），只有打开的会话会取全量 `turnCost` 记录。
-- 设置页数据：宿主用 `connection.fetch.register` 注册认证路由 `GET /api/turn-cost/state`（`billing.js`），返回钱包余额、全部会话的费用/标题/工作区归属与工作区汇总；浏览器用同源相对路径 `fetch`，请求头带 `x-dsh-turn-cost: 1`。数据缓存 30 秒（设置页另有 30 秒轮询与手动「刷新」）。没有 Connection 服务的部署会退回 `webServer` 静态路由（并自带 Host / 请求头校验）。
+- 设置页数据：宿主用 `connection.fetch.register` 注册认证路由 `GET /api/turn-cost/state`（`billing.js`），返回钱包余额、全部会话的费用/标题/工作区归属与工作区汇总；浏览器用同源相对路径 `fetch`，请求头带 `x-dsh-turn-cost: 1`。数据缓存 30 秒（设置页另有 30 秒轮询与手动「刷新」）。没有 Connection 服务的部署会退回 `webServer` 静态路由（并自带 Host / 请求头校验）。同一路由支持 `scope=subagents&sessionId=<父会话>`（见「子代理花费」一节），按 `sessionId` 单独缓存 30 秒、最多 50 个父会话，与 `balance` / `full` 的缓存互相独立；缺少或非法 `sessionId` 返回 400。
 
 ## 文件
 

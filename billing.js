@@ -25,15 +25,26 @@ const ACCOUNT_CACHE_TTL_MS = 30_000;
 const sessionCache = new Map();
 let stateCache = { at: 0, data: undefined, busy: undefined };
 
+/** Per-parent-Session cache of the `subagents` scope snapshot. */
+const SUBAGENT_CACHE_TTL_MS = 30_000;
+const SUBAGENT_CACHE_LIMIT = 50;
+const subagentCaches = new Map();
+
 function toNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
 /** Fold one Session log; cached by Session id for a short while. */
-async function sessionSummary(sessionQuery, sessionId) {
+async function sessionSummary(sessionQuery, sessionId, withTurns = false) {
   const hit = sessionCache.get(sessionId);
-  if (hit !== undefined && Date.now() - hit.at < SESSION_CACHE_TTL_MS) return hit.value;
+  if (
+    hit !== undefined &&
+    Date.now() - hit.at < SESSION_CACHE_TTL_MS &&
+    (!withTurns || Array.isArray(hit.value.turnList))
+  ) {
+    return hit.value;
+  }
 
   const snapshot = await sessionQuery.readSession(sessionId);
   const inherited = toNumber(snapshot.inheritedEventCount);
@@ -57,6 +68,20 @@ async function sessionSummary(sessionQuery, sessionId) {
     updatedAt: toNumber(view.updatedAt),
     header: snapshot.session || null,
   };
+  if (withTurns) {
+    // Compact per-turn rows for subagent attribution. Only ended turns can be
+    // attributed to a parent turn window; the Client decides the window.
+    value.turnList = (Array.isArray(view.turns) ? view.turns : [])
+      .map((turn) => ({
+        turn: toNumber(turn && turn.turn),
+        startedAt: toNumber(turn && turn.startedAt),
+        endedAt: toNumber(turn && turn.endedAt),
+        costMicro:
+          turn && turn.costMicro !== null && turn.costMicro !== undefined ? toNumber(turn.costMicro) : null,
+        plan: Boolean(turn && turn.plan === true),
+      }))
+      .filter((turn) => turn.endedAt > 0);
+  }
   sessionCache.set(sessionId, { at: Date.now(), value });
   return value;
 }
@@ -277,10 +302,155 @@ function buildWorkspaceIndexSafe(registry) {
 }
 
 /**
- * Read the snapshot the Client polls. `scope` is 'balance' for the reminder
- * only (one account call) and 'full' for the Settings page.
+ * Every descendant Session of `sessionId` (subagents, any depth) with compact
+ * per-turn costs. Costs are folded per child with the same model/price list the
+ * footer uses; names are intentionally not resolved here (the Client owns the
+ * `team/member` display-name mapping).
  */
-export async function readBillingState(ctx, scope) {
+async function buildSubagentsState(ctx, sessionId) {
+  const priceVersion = 'deepseek-cny-2026-11-11';
+  const snapshot = (sessions, degraded) => ({
+    v: 1,
+    scope: 'subagents',
+    sessionId,
+    priceVersion,
+    updatedAt: Date.now(),
+    sessions,
+    degraded,
+  });
+
+  const sessionQuery = ctx.get('sessionQuery');
+  if (
+    sessionQuery === undefined ||
+    sessionQuery === null ||
+    typeof sessionQuery.listSessions !== 'function' ||
+    typeof sessionQuery.readSession !== 'function'
+  ) {
+    return snapshot([], 'session service unavailable');
+  }
+
+  let records = [];
+  try {
+    const listed = await sessionQuery.listSessions();
+    records = Array.isArray(listed) ? listed : [];
+  } catch {
+    return snapshot([], 'session list unavailable');
+  }
+
+  // The header index is all that is needed to discover the child Sessions; the
+  // per-child `readSession` below reuses the Session fold cache.
+  const headerById = new Map();
+  const childrenByParent = new Map();
+  for (const record of records) {
+    const header = record && record.header;
+    const id = header && typeof header.id === 'string' ? header.id : '';
+    if (id === '') continue;
+    headerById.set(id, header);
+    const parentId = typeof header.parentSession === 'string' ? header.parentSession : '';
+    if (parentId === '') continue;
+    const known = childrenByParent.get(parentId);
+    if (known === undefined) childrenByParent.set(parentId, [id]);
+    else known.push(id);
+  }
+
+  const descendants = [];
+  const seen = new Set([sessionId]);
+  const queue = [sessionId];
+  while (queue.length > 0) {
+    const parentId = queue.shift();
+    const childIds = childrenByParent.get(parentId);
+    if (!Array.isArray(childIds)) continue;
+    for (const childId of childIds) {
+      if (seen.has(childId)) continue;
+      seen.add(childId);
+      descendants.push(childId);
+      queue.push(childId);
+    }
+  }
+  const createdAtOf = (id) => toNumber(headerById.get(id) && headerById.get(id).createdAt);
+  descendants.sort((a, b) => createdAtOf(a) - createdAtOf(b) || String(a).localeCompare(String(b)));
+
+  const sessions = [];
+  for (const id of descendants) {
+    const header = headerById.get(id) || {};
+    let summary;
+    try {
+      summary = await sessionSummary(sessionQuery, id, true);
+    } catch {
+      // One unreadable child log must not hide the other subagents.
+      summary = undefined;
+    }
+    sessions.push({
+      id,
+      title:
+        summary !== undefined && typeof summary.title === 'string' && summary.title !== ''
+          ? summary.title
+          : typeof header.title === 'string'
+            ? header.title
+            : '',
+      origin: typeof header.origin === 'string' ? header.origin : '',
+      delegationDepth: toNumber(header.delegationDepth),
+      createdAt: toNumber(header.createdAt),
+      costMicro: summary !== undefined ? summary.costMicro : 0,
+      costUsdMicro: summary !== undefined ? summary.costUsdMicro : 0,
+      planOnly: summary !== undefined && summary.pricedTurns === 0 && summary.planTurns > 0,
+      turns: summary !== undefined && Array.isArray(summary.turnList) ? summary.turnList : [],
+    });
+  }
+  return snapshot(sessions, false);
+}
+
+/**
+ * Read the snapshot the Client polls. `scope` is 'balance' for the reminder
+ * only (one account call), 'full' for the Settings page, and 'subagents' for
+ * one Session's descendant Sessions (needs `sessionId`).
+ */
+export async function readBillingState(ctx, scope, sessionId) {
+  if (scope === 'subagents') {
+    const id = typeof sessionId === 'string' ? sessionId.trim() : '';
+    if (id === '') throw new Error('sessionId is required for the subagents scope');
+    const cached = subagentCaches.get(id);
+    const now = Date.now();
+    if (cached !== undefined && cached.data !== undefined && now - cached.at < SUBAGENT_CACHE_TTL_MS) {
+      // LRU: a hit refreshes the insertion order.
+      subagentCaches.delete(id);
+      subagentCaches.set(id, { at: cached.at, data: cached.data, busy: undefined });
+      return cached.data;
+    }
+    if (cached !== undefined && cached.busy !== undefined) {
+      try {
+        await cached.busy;
+      } catch {
+        // fall through and retry ourselves
+      }
+      return readBillingState(ctx, scope, id);
+    }
+    const slot = { at: cached !== undefined ? cached.at : 0, data: cached !== undefined ? cached.data : undefined, busy: undefined };
+    slot.busy = (async () => {
+      try {
+        const data = await buildSubagentsState(ctx, id);
+        slot.at = Date.now();
+        slot.data = data;
+        return data;
+      } finally {
+        slot.busy = undefined;
+      }
+    })();
+    subagentCaches.delete(id);
+    subagentCaches.set(id, slot);
+    // Evict the oldest entry when the cache grows too large (the slot just read
+    // was re-inserted last, so the oldest key is a different Session).
+    if (subagentCaches.size > SUBAGENT_CACHE_LIMIT) {
+      const oldest = subagentCaches.keys().next();
+      if (!oldest.done && oldest.value !== id) subagentCaches.delete(oldest.value);
+    }
+    try {
+      return await slot.busy;
+    } finally {
+      if (slot.busy !== undefined) slot.busy = undefined;
+    }
+  }
+
   const wantFull = scope === 'full';
   const now = Date.now();
   const cached = stateCache.data;
@@ -328,6 +498,7 @@ export async function readBillingState(ctx, scope) {
 /** Force the next read to rebuild (used by tests and manual refreshes). */
 export function resetBillingCache() {
   sessionCache.clear();
+  subagentCaches.clear();
   stateCache = { at: 0, data: undefined, busy: undefined };
 }
 
@@ -353,9 +524,17 @@ export async function handleStateRequest(ctx, request) {
   if (request.headers.get('x-dsh-turn-cost') !== '1') {
     return new Response('forbidden', { status: 403 });
   }
-  const scope = url.searchParams.get('scope') === 'full' ? 'full' : 'balance';
+  const scopeParam = url.searchParams.get('scope');
+  const scope = scopeParam === 'full' || scopeParam === 'subagents' ? scopeParam : 'balance';
+  const sessionId = scope === 'subagents' ? String(url.searchParams.get('sessionId') || '').trim() : '';
+  if (scope === 'subagents' && (sessionId === '' || sessionId.length > 200 || /[\u0000-\u001f]/.test(sessionId))) {
+    return new Response(JSON.stringify({ v: 1, error: 'invalid sessionId' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+    });
+  }
   try {
-    const data = await readBillingState(ctx, scope);
+    const data = await readBillingState(ctx, scope, sessionId);
     return new Response(JSON.stringify(data), {
       status: 200,
       headers: {

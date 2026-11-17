@@ -158,14 +158,18 @@ const DICT = {
   badge: '本轮 {amount}',
   peakTag: '（峰）',
   offPeakTag: '（谷）',
-  session: '会话 {amount}',
-  sessionPartial: '会话 ≥ {amount}',
-  sessionPlanQuota: '会话消耗订阅额度',
+  session: '本会话 {amount}',
+  sessionPartial: '本会话 ≥ {amount}',
+  sessionPlanQuota: '本会话消耗订阅额度',
   planTurn: '本轮消耗订阅额度',
   costPlan: '订阅额度',
   costUnknown: '未知',
   panelTitleTurn: '本轮费用明细',
-  panelTitleSession: '会话费用明细',
+  panelTitleSession: '本会话费用明细',
+  subagentSection: '子代理（{count}）',
+  subagentRow: '{name}：{amount}',
+  subagentTotal: '子代理合计：{amount}',
+  tipAmountTotalWithAgents: '本轮金额合计（含子代理）：{amount}',
   tipModel: '模型：{model}',
   tipProvider: '提供方：{provider}',
   tipPeriod: '计费时段：{period}',
@@ -181,6 +185,7 @@ const DICT = {
   tipSessionTitle: '会话金额（{currency}）',
   tipSessionTokens: '会话 tokens：{tokens}',
   tipSessionTotal: '会话合计：{amount}',
+  tipSessionTotalWithSubagents: '本会话合计（含子代理）：{amount}',
   tipSessionScope: '范围：第 1–{turn} 轮，其中 {priced} 轮计价',
   tipSessionNote: '金额按官方价目表估算。',
   tipSessionId: '会话 ID：{id}',
@@ -282,7 +287,7 @@ test('footer order: model + effort + （峰）, then 本轮, then 会话', () =>
   assert.equal(textOf(findByAttr(tree, 'data-dsh-turn-effort')), ' High');
   assert.equal(textOf(findByAttr(tree, 'data-dsh-turn-period')), ' （峰）');
   assert.equal(textOf(findByAttr(tree, 'data-dsh-turn-cost')), '本轮 ¥2.34');
-  assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '会话 ¥2.34');
+  assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '本会话 ¥2.34');
   // DOM order: model span, turn button, session button.
   const order = findAll(row)
     .map((node) => node.props && (node.props['data-dsh-turn-model'] ? 'model' : node.props['data-dsh-cost-toggle']))
@@ -302,7 +307,7 @@ test('session total sums the displayed amounts of every turn up to this one', ()
     2,
   );
   assert.equal(textOf(findByAttr(tree, 'data-dsh-turn-cost')), '本轮 ¥1.17');
-  assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '会话 ¥3.51');
+  assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '本会话 ¥3.51');
   assert.equal(findByAttr(tree, 'data-dsh-session-cost').props['data-dsh-session-partial'], 'false');
   assert.equal(textOf(findByAttr(tree, 'data-dsh-turn-period')), ' （谷）');
 });
@@ -311,28 +316,28 @@ test('plan turn shows 订阅额度 wording instead of an amount', () => {
   const plan = entry(1, { pricing: 'plan', plan: true, costMicro: null, costUsdMicro: null, period: 'flat', modelName: 'GPT-5' });
   const tree = ui(viewWith([plan]), 1);
   assert.equal(textOf(findByAttr(tree, 'data-dsh-turn-cost')), '本轮消耗订阅额度');
-  assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '会话消耗订阅额度');
+  assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '本会话消耗订阅额度');
 });
 
 test('unknown model shows ¥?? and never a fabricated amount', () => {
   const unknown = entry(1, { pricing: 'unknown', costMicro: null, costUsdMicro: null, period: 'flat', provider: 'acme', model: 'mystery' });
   const tree = ui(viewWith([unknown]), 1);
   assert.equal(textOf(findByAttr(tree, 'data-dsh-turn-cost')), '本轮 ¥??');
-  assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '会话 ¥??');
+  assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '本会话 ¥??');
 });
 
 test('free model shows ¥0', () => {
   const free = entry(1, { pricing: 'free', costMicro: 0, costUsdMicro: 0, period: 'flat' });
   const tree = ui(viewWith([free]), 1);
   assert.equal(textOf(findByAttr(tree, 'data-dsh-turn-cost')), '本轮 ¥0');
-  assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '会话 ¥0');
+  assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '本会话 ¥0');
 });
 
 test('mixed plan+priced session is a lower bound (≥) and plan turns are skipped in the sum', () => {
   const plan = entry(1, { pricing: 'plan', plan: true, costMicro: null, costUsdMicro: null, period: 'flat' });
   const tree = ui(viewWith([plan, entry(2)]), 2);
   const session = findByAttr(tree, 'data-dsh-session-cost');
-  assert.equal(textOf(session), '会话 ≥ ¥2.34');
+  assert.equal(textOf(session), '本会话 ≥ ¥2.34');
   assert.equal(session.props['data-dsh-session-partial'], 'true');
 });
 
@@ -385,7 +390,7 @@ test('USD mode uses the official US$ amount, not CNY/7.1', () => {
   try {
     const tree = ui(viewWith([entry(1)]), 1);
     assert.equal(textOf(findByAttr(tree, 'data-dsh-turn-cost')), '本轮 $0.351');
-    assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '会话 $0.351');
+    assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '本会话 $0.351');
   } finally {
     plugin.settings.write({ ...plugin.settings.read(), currency: 'CNY' });
   }
@@ -396,7 +401,7 @@ test('display toggles hide the turn amount but keep the session amount', () => {
   try {
     const tree = ui(viewWith([entry(1)]), 1);
     assert.equal(findByAttr(tree, 'data-dsh-cost-toggle', 'turn'), undefined);
-    assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '会话 ¥2.34');
+    assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '本会话 ¥2.34');
   } finally {
     plugin.settings.write({ ...plugin.settings.read(), showTurn: true, showSession: true });
   }
@@ -612,10 +617,258 @@ test('clicking 会话 opens the session dialog with a ≥ bound for a mixed sess
   const panel = findByAttr(tree, 'data-dsh-cost-panel', 'session');
   assert.ok(panel, 'session dialog must open');
   const text = textOf(panel);
-  assert.match(text, /会话费用明细/);
+  assert.match(text, /本会话费用明细/);
   assert.match(text, /≥/);
   assert.match(text, /2\.34/);
 });
+
+/* ------------------------------------------------------------------ */
+/* subagents: names, attribution, aggregation, dictionary copy        */
+/* ------------------------------------------------------------------ */
+
+await test('subagent name priority: entry agents, then Session agents, then title, then id', async () => {
+  const agentsOf = plugin.subagents.agentsOf;
+  const agents = agentsOf(
+    [{ agents: [{ id: 'child-a', name: 'from-entry' }, { id: 'child-b', name: '' }] }],
+    [{ id: 'child-a', name: 'from-live' }, { id: 'child-c', name: 'live-only' }, { id: 'child-d', name: '  ' }],
+  );
+  assert.equal(agents.get('child-a'), 'from-entry');
+  assert.equal(agents.get('child-b'), undefined);
+  assert.equal(agents.get('child-c'), 'live-only');
+  assert.equal(agents.get('child-d'), undefined);
+
+  const nameOf = plugin.subagents.nameOf;
+  assert.equal(nameOf({ id: 'child-a', title: 'prompt prefix title' }, agents), 'from-entry');
+  assert.equal(nameOf({ id: 'child-z', title: 'child title' }, new Map()), 'child title');
+  assert.equal(nameOf({ id: 'abcdefghijkl', title: '' }, new Map()), 'abcdefgh');
+});
+
+await test('turn attribution uses child turn end time inside the parent window', async () => {
+  const sessions = [
+    {
+      id: 'child-a',
+      title: 'fix the bug',
+      costMicro: 5000,
+      turns: [
+        { turn: 1, endedAt: 150, costMicro: 1000, plan: false },
+        { turn: 2, endedAt: 250, costMicro: 2000, plan: false },
+        { turn: 3, endedAt: 0, costMicro: 9999, plan: false },
+      ],
+    },
+    {
+      id: 'child-b',
+      title: '',
+      costMicro: 2000,
+      turns: [{ turn: 1, endedAt: 140, costMicro: 2000, plan: false }],
+    },
+    {
+      id: 'child-plan',
+      title: '',
+      costMicro: 0,
+      turns: [{ turn: 1, endedAt: 130, costMicro: null, plan: true }],
+    },
+  ];
+  const agents = new Map([['child-a', 'bug-fixer']]);
+  const ended = plugin.subagents.attributeTurn(sessions, agents, 100, 200);
+  assert.deepEqual(
+    ended.map((item) => [item.id, item.name, item.micro, item.planOnly]),
+    [
+      ['child-b', 'child-b', 2000, false],
+      ['child-a', 'bug-fixer', 1000, false],
+      ['child-plan', 'child-pl', 0, true],
+    ],
+  );
+  // A running parent turn (endedAt 0) keeps the window open to infinity, so a
+  // child turn that ends after the tail timestamp is still attributed live.
+  const live = plugin.subagents.attributeTurn(sessions, agents, 100, 0);
+  assert.deepEqual(
+    live.map((item) => [item.id, item.micro]),
+    [
+      ['child-a', 3000],
+      ['child-b', 2000],
+      ['child-plan', 0],
+    ],
+  );
+  // Unknown start / no sessions: empty, never throws.
+  assert.deepEqual(plugin.subagents.attributeTurn(sessions, agents, 0, 0), []);
+  assert.deepEqual(plugin.subagents.attributeTurn(undefined, agents, 100, 0), []);
+});
+
+await test('Session aggregation sums each subagent across all of its turns', async () => {
+  const sessions = [
+    { id: 'child-a', title: 'fix the bug', costMicro: 3000, turns: [{ turn: 1, endedAt: 5, costMicro: 1000, plan: false }, { turn: 2, endedAt: 9, costMicro: 2000, plan: false }] },
+    { id: 'child-b', title: '', costMicro: 3000, turns: [{ turn: 1, endedAt: 7, costMicro: 3000, plan: false }] },
+    { id: 'child-plan', title: '', costMicro: 0, planOnly: true, turns: [{ turn: 1, endedAt: 8, costMicro: null, plan: true }] },
+    { id: 'child-empty', title: '', costMicro: 0, turns: [] },
+  ];
+  const agents = new Map([['child-a', 'bug-fixer']]);
+  const items = plugin.subagents.aggregateSession(sessions, agents);
+  assert.deepEqual(
+    items.map((item) => [item.id, item.name, item.micro, item.planOnly]),
+    [
+      ['child-a', 'bug-fixer', 3000, false],
+      ['child-b', 'child-b', 3000, false],
+      ['child-plan', 'child-pl', 0, true],
+    ],
+  );
+  // A badge for an earlier turn must not include spend that happened later:
+  // only child turns that had ended by the parent turn end are counted.
+  const early = plugin.subagents.aggregateSession(sessions, agents, 7);
+  assert.deepEqual(
+    early.map((item) => [item.id, item.micro, item.planOnly]),
+    [
+      ['child-b', 3000, false],
+      ['child-a', 1000, false],
+    ],
+  );
+});
+
+await test('「本会话」 and subagent strings exist in both shipped dictionaries', async () => {
+  for (const [locale, expected] of Object.entries({
+    zh: {
+      session: '本会话 {amount}',
+      sessionPartial: '本会话 ≥ {amount}',
+      sessionPlanQuota: '本会话消耗订阅额度',
+      panelTitleSession: '本会话费用明细',
+      subagentSection: '子代理（{count}）',
+      subagentRow: '{name}：{amount}',
+      subagentTotal: '子代理合计：{amount}',
+      tipAmountTotalWithAgents: '本轮金额合计（含子代理）：{amount}',
+    },
+    en: {
+      session: 'This session {amount}',
+      sessionPartial: 'This session ≥ {amount}',
+      sessionPlanQuota: 'This session consumed subscription quota',
+      panelTitleSession: 'This session cost',
+      subagentSection: 'Subagents ({count})',
+      subagentRow: '{name}: {amount}',
+      subagentTotal: 'Subagents total: {amount}',
+      tipAmountTotalWithAgents: 'Turn cost total (incl. subagents): {amount}',
+    },
+  })) {
+    const dict = plugin.dictionaries[locale];
+    assert.ok(dict, `dictionary ${locale} must be exposed`);
+    for (const [key, value] of Object.entries(expected)) {
+      assert.equal(dict[key], value, `${locale}.${key}`);
+    }
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* subagent cost in the footer (fake Host + fake React)               */
+/* ------------------------------------------------------------------ */
+
+await (async () => {
+  const name = 'footer turn/session amounts include attributed subagent cost';
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  let restoreSettings;
+  try {
+    globalThis.fetch = async (url) => {
+      assert.match(String(url), /scope=subagents/);
+      assert.match(String(url), /sessionId=s1/);
+      return {
+        ok: true,
+        async json() {
+          return {
+            v: 1,
+            scope: 'subagents',
+            sessionId: 's1',
+            priceVersion: 'deepseek-cny-2026-11-11',
+            updatedAt: 1,
+            sessions: [
+              {
+                id: 'child-a',
+                title: 'prompt prefix',
+                origin: 'subagent',
+                delegationDepth: 1,
+                createdAt: 1,
+                costMicro: 100_000,
+                planOnly: false,
+                turns: [{ turn: 1, startedAt: 0, endedAt: 50, costMicro: 100_000, plan: false }],
+              },
+            ],
+            degraded: false,
+          };
+        },
+      };
+    };
+    globalThis.window = { ...originalWindow, setInterval: () => 0, clearInterval: () => {} };
+    restoreSettings = plugin.settings.read();
+    plugin.settings.write({ ...restoreSettings, showTurn: true, showSession: true });
+    // Let requests started by earlier synchronous renders settle before
+    // installing the fake Host, otherwise a stale pending promise would win.
+    for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    const view = viewWith([entry(1, { startedAt: 10, endedAt: 60 })]);
+    view.agents = [{ id: 'child-a', name: 'bug-fixer' }];
+    resetHooks();
+    let tree = render(TurnCostBadge, propsFor(view, 1));
+    // Let the (fake) fetch resolve, then re-render with the fetched state.
+    for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    hookIndex = 0;
+    effectQueue = [];
+    tree = TurnCostBadge(propsFor(view, 1));
+    for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    hookIndex = 0;
+    effectQueue = [];
+    tree = TurnCostBadge(propsFor(view, 1));
+    assert.equal(textOf(findByAttr(tree, 'data-dsh-turn-cost')), '本轮 ¥2.44');
+    assert.equal(textOf(findByAttr(tree, 'data-dsh-session-cost')), '本会话 ¥2.44');
+
+    const turnButton = findByAttr(tree, 'data-dsh-cost-toggle', 'turn');
+    turnButton.props.onClick({
+      stopPropagation() {},
+      currentTarget: {
+        getBoundingClientRect: () => ({ top: 580, right: 1000, bottom: 608, left: 900, width: 100, height: 28 }),
+        parentElement: null,
+        style: undefined,
+      },
+    });
+    hookIndex = 0;
+    effectQueue = [];
+    tree = TurnCostBadge(propsFor(view, 1));
+    const panel = findByAttr(tree, 'data-dsh-cost-panel', 'turn');
+    assert.ok(panel, 'turn dialog must open');
+    const text = textOf(panel);
+    assert.match(text, /子代理（1）/);
+    assert.match(text, /bug-fixer/);
+    assert.match(text, /¥0\.1/);
+    assert.match(text, /子代理合计/);
+    assert.match(text, /本轮金额合计（含子代理）/);
+    assert.match(text, /¥2\.44/);
+
+    // The Session dialog shows the same combined total plus the per-subagent
+    // breakdown, placed before the scope note.
+    const sessionButton = findByAttr(tree, 'data-dsh-cost-toggle', 'session');
+    sessionButton.props.onClick({
+      stopPropagation() {},
+      currentTarget: {
+        getBoundingClientRect: () => ({ top: 580, right: 1000, bottom: 608, left: 900, width: 100, height: 28 }),
+        parentElement: null,
+        style: undefined,
+      },
+    });
+    hookIndex = 0;
+    effectQueue = [];
+    tree = TurnCostBadge(propsFor(view, 1));
+    const sessionPanel = findByAttr(tree, 'data-dsh-cost-panel', 'session');
+    assert.ok(sessionPanel, 'session dialog must open');
+    const sessionText = textOf(sessionPanel);
+    assert.match(sessionText, /本会话合计（含子代理）/);
+    assert.match(sessionText, /子代理（1）/);
+    assert.match(sessionText, /bug-fixer/);
+    assert.match(sessionText, /子代理合计/);
+    assert.match(sessionText, /¥2\.44/);
+    results.push({ name, ok: true });
+  } catch (error) {
+    failed += 1;
+    results.push({ name, ok: false, error });
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+    plugin.settings.write(restoreSettings);
+  }
+})();
 
 for (const result of results) {
   if (result.ok) console.log(`PASS  ${result.name}`);

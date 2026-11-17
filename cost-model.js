@@ -32,7 +32,7 @@ export const PROJECTION_KEY = 'turnCost';
 
 /** Bump when the state/view shape changes; the projection cache is versioned. */
 /** Bumped when the projection state or its client-visible view changes shape. */
-export const COST_MODEL_VERSION = 11;
+export const COST_MODEL_VERSION = 12;
 
 /** Per-successful-request price of the Web Search / Fetch APIs, in micro-CNY. */
 export const SEARCH_REQUEST_MICRO = 5000;
@@ -488,6 +488,11 @@ export function createState(sessionId, inheritedEventCount = 0) {
     priceVersion: PRICE_VERSION,
     turns: [],
     open: null,
+    // Session-level subagent display names (`team/member` events): id -> name.
+    // Kept on the Session (not only the open turn) because a continued subagent
+    // run emits no further `team/member` event, yet later turns must show its
+    // name instead of the child Session's prompt-prefix title.
+    agents: {},
     sessionCostMicro: 0,
     sessionCostUsdMicro: 0,
     sessionFreeTurns: 0,
@@ -665,6 +670,10 @@ function finalizeTurn(state, open, endedAt) {
     empty: !hasUsage,
     sessionCostMicro,
     sessionCostUsdMicro,
+    // Subagents announced while this turn was open, in first-appearance order.
+    // Continued subagent runs emit no `team/member` event, so the Session-level
+    // `agents` map in the view is the fallback for their names.
+    agents: Object.values(open.agents || {}).map(({ id, name }) => ({ id, name })),
   };
   const next = {
     ...state,
@@ -710,6 +719,30 @@ export function foldEvent(state, event) {
     return { ...state, title, updatedAt: Number(event.time) || state.updatedAt };
   }
 
+  if (event.type === 'team/member') {
+    const member = data && typeof data.member === 'object' && data.member !== null ? data.member : undefined;
+    const id = member && typeof member.id === 'string' ? member.id.trim() : '';
+    if (id === '') return state;
+    const name = member && typeof member.name === 'string' ? member.name.trim() : '';
+    const previousName = state.agents && typeof state.agents[id] === 'string' ? state.agents[id] : '';
+    // The latest non-empty name wins; the id is recorded even before a name is
+    // known so a continued run can still be resolved afterwards.
+    const nextName = name !== '' ? name : previousName;
+    const agents = { ...(state.agents || {}) };
+    if (nextName !== '') agents[id] = nextName;
+    else if (!(id in agents)) agents[id] = '';
+    // The open turn keeps its own ordered id->{id,name} map; the entry stores it
+    // in first-appearance order so the dialog lists subagents deterministically.
+    const open = state.open;
+    let nextOpen = open;
+    if (open) {
+      const openAgents = { ...(open.agents || {}) };
+      openAgents[id] = { id, name: nextName };
+      nextOpen = { ...open, agents: openAgents };
+    }
+    return { ...state, agents, open: nextOpen, updatedAt: Number(event.time) || state.updatedAt };
+  }
+
   if (event.type === 'turn/start') {
     const turn = Number(data && data.turn) || 0;
     if (turn <= 0) return state;
@@ -725,6 +758,8 @@ export function foldEvent(state, event) {
         searchRequests: 0,
         fetchRequests: 0,
         messagesRequests: 0,
+        // Ordered subagent id -> {id,name} map for this turn (`team/member`).
+        agents: {},
       },
       updatedAt: Number(event.time) || state.updatedAt,
     };
@@ -858,6 +893,9 @@ export function viewOf(state) {
     title: state.title,
     priceVersion: state.priceVersion,
     updatedAt: state.updatedAt,
+    // Session-wide subagent id -> latest known name. It survives across turns,
+    // so a continued subagent (no fresh `team/member`) still resolves.
+    agents: Object.keys(state.agents || {}).map((id) => ({ id, name: state.agents[id] })),
     // Resolve the display name at view time as well: the Host may still be
     // fetching the model catalog while the first sessions are replayed, and a
     // later event republishes the view with the names filled in.

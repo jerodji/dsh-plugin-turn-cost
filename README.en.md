@@ -50,6 +50,7 @@ In short: **it turns "how much did these tokens cost?" from invisible and hard t
 
 - **This turn / session cost** — the estimated cost of the turn and the cumulative session cost up to that turn. Earlier turns never change when new turns arrive.
 - **Detail popovers** — "This turn" shows token usage, billing period, per-bucket unit prices and amounts; "Session" shows cumulative tokens, stats range and the Session ID.
+- **Subagent costs** — in delegated conversations, "This turn" includes the subagent cost attributed to that turn and the turn popover gains a "Subagents (N)" section; "This session" includes every subagent that had finished by the end of that turn (a subagent's turns are merged across turns). Subagents are attributed by their own turn end time, so the figures are estimates — the official bill prevails.
 - **Peak / off-peak tag** — `(peak)` / `(off-peak)` follows the model label (after the reasoning effort) and is judged by the turn's own end time (off-peak is 50% off); the "This turn" button shows the amount only. Retired models with flat pricing get no tag.
 - **Budget reminder** — a persistent "$ Budget N" pill in the composer tool row (left of the model selector; only the currency symbol when the composer is narrow), usable in a new conversation or mid-conversation. When the session total reaches the budget the label turns orange, as a warning that never interrupts the conversation.
 - **Balance reminder** — set separate CNY and USD thresholds under Settings; you are notified once when the balance drops below the threshold, with "Remind me later" (silent for the rest of the day) and "Don't remind again" (silent until the balance recovers and dips again).
@@ -80,6 +81,7 @@ In short: **it turns "how much did these tokens cost?" from invisible and hard t
 - Web search / fetch is billed per successful request (¥5 or $0.75 per 1,000), only for the new Search/Fetch API and only for DeepSeek models.
 - Statutory holidays are not excluded, and turns spanning peak/off-peak are priced by their end time — both are approximations.
 - Turns aborted without any reply show no badge and count as 0.
+- **Subagent costs**: subagents are billed in their own sessions; a child turn is attributed to the parent turn whose window contains that child turn's end time (the badge appears only after the turn ends, so its amount is fixed). Continued subagents take their names from the session-level member record, falling back to the child session title, then the first 8 characters of the session ID; plan subagents show "subscription quota" and are excluded from money totals. Still an estimate — the official bill prevails.
 
 ## Compatibility
 

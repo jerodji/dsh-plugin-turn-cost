@@ -699,11 +699,102 @@ test('events below inheritedEventCount are skipped', () => {
   assert.equal(foldAll(events, 'sess-1', 10).turns.length, 1);
 });
 
-test('state/view carry model/version 11', () => {
+test('state/view carry model/version 12', () => {
   const state = createState('s', 0);
   assert.equal(state.priceVersion, 'deepseek-cny-2026-11-11');
   assert.equal(viewOf(state).v, COST_MODEL_VERSION);
-  assert.equal(COST_MODEL_VERSION, 11);
+  assert.equal(COST_MODEL_VERSION, 12);
+});
+
+/* ------------------------------------------------------------------ */
+/* 子代理（team/member）                                                */
+/* ------------------------------------------------------------------ */
+
+function memberEvent(seq, time, member) {
+  return { seq, type: 'team/member', time, data: { member } };
+}
+
+function assistantEvent(seq, time, turn, tokens = TOKENS, model = 'deepseek-v4-flash', provider = 'deepseek') {
+  return {
+    seq,
+    type: 'assistant/message',
+    time,
+    data: { turn, step: 0, usage: usageFor(tokens), source: { provider, model } },
+  };
+}
+
+test('team/member records subagents on the open turn and the Session view', () => {
+  const events = [
+    { seq: 1, type: 'turn/start', time: MONDAY_PEAK, data: { turn: 1 } },
+    memberEvent(2, MONDAY_PEAK + 500, { id: 'child-a', name: 'bug-fixer', phase: 'active' }),
+    memberEvent(3, MONDAY_PEAK + 600, { id: 'child-b', name: 'host-reviewer', phase: 'provisioning' }),
+    // The same member is announced again (create -> active): one entry, one name.
+    memberEvent(4, MONDAY_PEAK + 700, { id: 'child-a', name: 'bug-fixer', phase: 'active' }),
+    assistantEvent(5, MONDAY_PEAK + 1000, 1),
+    { seq: 6, type: 'turn/end', time: MONDAY_PEAK + 60_000, data: { turn: 1 } },
+  ];
+  const state = foldAll(events, 'sess-1');
+  assert.equal(state.turns.length, 1);
+  assert.deepEqual(state.turns[0].agents, [
+    { id: 'child-a', name: 'bug-fixer' },
+    { id: 'child-b', name: 'host-reviewer' },
+  ]);
+  // team/member must never move tokens, price or cost.
+  assert.equal(state.turns[0].costMicro, 2_340_000);
+  assert.equal(state.turns[0].tokens.total, 1_850_000);
+  assert.equal(state.sessionCostMicro, 2_340_000);
+  assert.deepEqual(viewOf(state).agents, [
+    { id: 'child-a', name: 'bug-fixer' },
+    { id: 'child-b', name: 'host-reviewer' },
+  ]);
+});
+
+test('open turn keeps its ordered subagent map before the turn ends', () => {
+  const state = foldAll(
+    [
+      { seq: 1, type: 'turn/start', time: MONDAY_PEAK, data: { turn: 1 } },
+      memberEvent(2, MONDAY_PEAK + 500, { id: 'child-a', name: 'bug-fixer' }),
+      memberEvent(3, MONDAY_PEAK + 600, { id: 'child-b', name: '' }),
+    ],
+    'sess-1',
+  );
+  assert.deepEqual(state.open.agents, {
+    'child-a': { id: 'child-a', name: 'bug-fixer' },
+    'child-b': { id: 'child-b', name: '' },
+  });
+});
+
+test('Session-level subagent names survive a continued run without team/member', () => {
+  const turn1 = turnEvents({ turn: 1 });
+  turn1.splice(1, 0, memberEvent(90, MONDAY_PEAK + 500, { id: 'child-a', name: 'old-name' }));
+  turn1.splice(2, 0, memberEvent(91, MONDAY_PEAK + 600, { id: 'child-a', name: 'bug-fixer' }));
+  // A continued run (send_message) emits no team/member: turn 2 keeps no agents.
+  const turn2 = turnEvents({ turn: 2, seq: 10 });
+  const state = foldAll(turn1.concat(turn2), 'sess-1');
+  assert.deepEqual(state.turns[0].agents, [{ id: 'child-a', name: 'bug-fixer' }]);
+  assert.deepEqual(state.turns[1].agents, []);
+  // ... but the Session-wide map still resolves the display name.
+  assert.deepEqual(viewOf(state).agents, [{ id: 'child-a', name: 'bug-fixer' }]);
+});
+
+test('team/member tolerates malformed events and an empty view has no agents', () => {
+  let state = createState('s');
+  for (const event of [
+    null,
+    {},
+    { type: 'team/member' },
+    { type: 'team/member', data: {} },
+    { type: 'team/member', data: { member: {} } },
+    { type: 'team/member', data: { member: { id: 42, name: 'x' } } },
+    { type: 'team/member', data: { member: { id: '', name: 'x' } } },
+    { type: 'team/member', data: { member: 'nope' } },
+  ]) {
+    state = foldEvent(state, event);
+  }
+  assert.deepEqual(state.agents, {});
+  assert.deepEqual(viewOf(state).agents, []);
+  const emptyTurn = turnEvents({ usage: null });
+  assert.deepEqual(foldAll(emptyTurn, 'sess-1').turns[0].agents, []);
 });
 
 test('foldEvent tolerates malformed events without throwing', () => {
