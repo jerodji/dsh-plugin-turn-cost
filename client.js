@@ -1511,9 +1511,13 @@ window.__ModuleLoader__.load({
         const originHeight = blockRect && blockRect.height > 0 ? blockRect.height : height;
         const panelWidth = Math.min(440, Math.max(300, originWidth - 24));
         const right = Math.max(8, Math.min(originRight - rect.right, originWidth - panelWidth - 8));
-        const panelHeight = estimatePanelHeight(lines, originHeight);
-        const spaceAbove = rect.top - originTop;
-        const spaceBelow = originBottom - rect.bottom;
+        const panelHeight = estimatePanelHeight(lines, height);
+        // Measure the room in VIEWPORT coordinates. The composer seat becomes
+        // the fixed containing block (it sets will-change: transform) but is
+        // much shorter than a floating dialog, so clamping against the block
+        // height collapsed the budget popover to one row.
+        const spaceAbove = rect.top;
+        const spaceBelow = height - rect.bottom;
         const fitsAbove = spaceAbove >= panelHeight + 8;
         const fitsBelow = spaceBelow >= panelHeight + 8;
         const above =
@@ -1529,7 +1533,7 @@ window.__ModuleLoader__.load({
                     ? false
                     : spaceAbove >= spaceBelow;
         const room = above ? spaceAbove : spaceBelow;
-        const maxHeight = Math.max(48, Math.min(Math.round(originHeight * 0.7), Math.round(room) - 8));
+        const maxHeight = Math.max(48, Math.min(Math.round(height * 0.7), Math.round(room) - 8));
         return above
           ? { right, side: 'above', maxHeight, bottom: Math.max(8, originBottom - rect.top + 8) }
           : { right, side: 'below', maxHeight, top: Math.max(8, rect.bottom - originTop + 8) };
@@ -5213,6 +5217,7 @@ window.__ModuleLoader__.load({
       helpers: {
         panelRowParts,
         mergeVisibleSelection,
+        panelPosition,
       },
       subagents: {
         attributeTurn: attributeSubagents,

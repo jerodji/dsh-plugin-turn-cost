@@ -893,6 +893,35 @@ test('panelRowParts splits both zh and en label rows (A5)', () => {
   assert.equal(panelRowParts('no separator here'), undefined);
 });
 
+test('dialog maxHeight uses viewport room, not the short containing block', () => {
+  const { panelPosition } = plugin.helpers;
+  const originalWindow = globalThis.window;
+  const originalGetComputedStyle = globalThis.getComputedStyle;
+  try {
+    globalThis.window = { innerWidth: 1200, innerHeight: 800 };
+    // The composer seat sets will-change: transform, so it becomes the fixed
+    // containing block. It is only 100px tall while the dialog floats above it.
+    const seat = {
+      nodeType: 1,
+      parentElement: null,
+      getBoundingClientRect: () => ({ top: 520, left: 0, right: 1200, bottom: 620, width: 1200, height: 100 }),
+    };
+    const trigger = {
+      getBoundingClientRect: () => ({ top: 560, left: 900, right: 1000, bottom: 588, width: 100, height: 28 }),
+      parentElement: seat,
+    };
+    globalThis.getComputedStyle = (node) => (node === seat ? { willChange: 'transform' } : { willChange: 'auto' });
+    const lines = Array.from({ length: 20 }, (_, index) => `行 ${index}：值`);
+    const pos = panelPosition({ currentTarget: trigger }, lines, 'above');
+    assert.ok(pos, 'panel position must be computed');
+    assert.equal(pos.side, 'above');
+    assert.ok(pos.maxHeight >= 300, `maxHeight ${pos.maxHeight} collapsed to the containing block height`);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.getComputedStyle = originalGetComputedStyle;
+  }
+});
+
 test('select-all only touches visible ids (A8)', () => {
   const { mergeVisibleSelection } = plugin.helpers;
   assert.deepEqual(mergeVisibleSelection({ outside: true, keep: true }, ['vis'], true), {
