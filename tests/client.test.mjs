@@ -835,11 +835,13 @@ await (async () => {
     assert.match(text, /bug-fixer/);
     assert.match(text, /¥0\.1/);
     assert.match(text, /子代理合计/);
-    assert.match(text, /本轮金额合计（含子代理）/);
-    assert.match(text, /¥2\.44/);
+    // The cost-breakdown block stays main-agent only: its total excludes the
+    // subagent rows, while the pill/header amount stays combined.
+    assert.match(text, /本轮金额合计.*2\.34/);
+    assert.doesNotMatch(text, /含子代理/);
 
-    // The Session dialog shows the same combined total plus the per-subagent
-    // breakdown, placed before the scope note.
+    // The Session dialog shows the main-agent total plus the per-subagent
+    // breakdown; only the pill/header keep the combined amount.
     const sessionButton = findByAttr(tree, 'data-dsh-cost-toggle', 'session');
     sessionButton.props.onClick({
       stopPropagation() {},
@@ -855,7 +857,8 @@ await (async () => {
     const sessionPanel = findByAttr(tree, 'data-dsh-cost-panel', 'session');
     assert.ok(sessionPanel, 'session dialog must open');
     const sessionText = textOf(sessionPanel);
-    assert.match(sessionText, /本会话合计（含子代理）/);
+    assert.match(sessionText, /会话合计.*2\.34/);
+    assert.doesNotMatch(sessionText, /含子代理/);
     assert.match(sessionText, /子代理（1）/);
     assert.match(sessionText, /bug-fixer/);
     assert.match(sessionText, /子代理合计/);

@@ -25,7 +25,7 @@ DeepSeek-V4.1-Flash High （谷）  本轮 ¥0.189    会话 ¥1.048
 
 <img src="docs/screenshots/06-turn-cost-dialog.png" alt="本轮费用明细" style="zoom:50%;" />
 
-**会话费用明细**：点「会话」展开，含当前会话 tokens、会话合计、统计范围与会话 ID。
+**会话费用明细**：点「会话」展开，含当前会话 tokens、会话合计（只计主代理，子代理单独分段）、统计范围与会话 ID。
 
 <img src="docs/screenshots/05-session-cost-dialog.png" alt="会话费用明细" style="zoom:50%;" />
 

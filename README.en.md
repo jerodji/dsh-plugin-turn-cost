@@ -25,7 +25,7 @@ DeepSeek-V4.1-Flash High (off-peak)  This turn $0.027    Session $0.151
 
 <img src="docs/screenshots/06-turn-cost-dialog.png" alt="Turn cost detail" style="zoom:50%;" />
 
-**Session cost detail**: click “Session” to see the current session's tokens, session total, the priced range and the session ID.
+**Session cost detail**: click “Session” to see the current session's tokens, the main-agent session total (subagents are listed separately), the priced range and the session ID.
 
 <img src="docs/screenshots/05-session-cost-dialog.png" alt="Session cost detail" style="zoom:50%;" />
 

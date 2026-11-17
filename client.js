@@ -1170,20 +1170,20 @@ window.__ModuleLoader__.load({
     }
 
     function describeSession(session, t, extra) {
+      // The dialog's own section describes the MAIN session only: its total is
+      // the main agent's own priced spend. Subagent spend has its own section
+      // below and is not folded into this line (the pill/header amount is the
+      // combined one).
       const amount =
         session.amountText !== undefined
           ? `${session.partial ? '≥ ' : ''}${session.amountText}`
           : `${session.partial ? '≥ ' : ''}${session.approx ? '≈' : ''}${money(session.sum)}`;
-      const withSubagents =
-        extra !== undefined && extra !== null && (extra.withSubagents === true || (Array.isArray(extra.subagentLines) && extra.subagentLines.length > 0));
-      const totalText =
-        extra !== undefined && extra !== null && typeof extra.totalAmountText === 'string' && extra.totalAmountText !== ''
-          ? extra.totalAmountText
-          : amount;
+      const subagentLines =
+        extra !== undefined && extra !== null && Array.isArray(extra.subagentLines) ? extra.subagentLines : [];
       const lines = [
         t('tipSessionTitle', { currency: currencyName() }),
         t('tipSessionTokens', { tokens: group(session.tokens) }),
-        t(withSubagents ? 'tipSessionTotalWithSubagents' : 'tipSessionTotal', { amount: totalText }),
+        t('tipSessionTotal', { amount }),
         t('tipSessionScope', { turn: session.total, priced: session.priced }),
       ];
       if (Number(session.free) > 0) lines.splice(3, 0, t('tipSessionFree', { count: group(session.free) }));
@@ -1191,19 +1191,18 @@ window.__ModuleLoader__.load({
       if (Number(session.webFee) > 0) lines.splice(3, 0, t('tipSessionWeb', { amount: money(session.webFee) }));
       if (session.sessionId) lines.push(t('tipSessionId', { id: session.sessionId }));
       if (session.partial) lines.push(t('tipSessionMissing', { turns: summarizeTurns(session.missing, t) }));
-      // Subagent rows sit before the scope note, so the dialog's total line and
-      // this breakdown describe the same number.
-      if (withSubagents && Array.isArray(extra.subagentLines) && extra.subagentLines.length > 0) {
-        lines.push('', ...extra.subagentLines);
+      // Subagents are listed after the main session's own numbers; their
+      // total is separate and not included in the line above.
+      if (subagentLines.length > 0) {
+        lines.push('', ...subagentLines);
       }
       lines.push(t('tipSessionNote', {}));
       return lines;
     }
 
     /** Per-bucket money breakdown of one turn: tokens × unit price = amount. */
-    function turnAmountLines(detail, t, subagentMicro = 0) {
+    function turnAmountLines(detail, t) {
       if (!detail) return [];
-      const extraMicro = Math.max(0, Number(subagentMicro) || 0);
       if (detail.status === 'unknown') {
         return [
           t('tipAmountTitle', { currency: currencyName() }),
@@ -1271,13 +1270,9 @@ window.__ModuleLoader__.load({
         }
         if (web.messages > 0) lines.push(t('tipWebMessages', { count: group(web.messages) }));
       }
-      const ownMicro = Number(detail.total) || 0;
-      const totalKey = extraMicro > 0 ? 'tipAmountTotalWithAgents' : 'tipAmountTotal';
-      lines.push(
-        t(totalKey, {
-          amount: extraMicro > 0 ? money(ownMicro + extraMicro / 1e6) : approx + money(detail.total),
-        }),
-      );
+      // The amount breakdown is the main agent's own cost only; subagent
+      // spend is summarized in its own section and never folded in here.
+      lines.push(t('tipAmountTotal', { amount: approx + money(detail.total) }));
       return lines;
     }
 
@@ -2357,7 +2352,7 @@ window.__ModuleLoader__.load({
           : [
               ...turnLines,
               '',
-              ...turnAmountLines(turnDetail, t, ownStatus === 'plan' ? 0 : subagentTurnMicro),
+              ...turnAmountLines(turnDetail, t),
               ...(turnSubagentLines.length > 0 ? ['', ...turnSubagentLines] : []),
               '',
               ...turnFootLines,
@@ -2403,8 +2398,6 @@ window.__ModuleLoader__.load({
         session === undefined
           ? []
           : describeSession(session, t, {
-              withSubagents: subagentSessionMicro > 0 || sessionSubagentLines.length > 0,
-              totalAmountText: `${sessionBoundPrefix}${sessionAmountText}`,
               subagentLines: sessionSubagentLines,
             });
 
