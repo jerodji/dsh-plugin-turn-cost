@@ -25,6 +25,14 @@ let hookState = [];
 let hookRefs = [];
 let effectQueue = [];
 let dirty = false;
+// Seats = number of hook calls in the current render pass. Used by the
+// 1.6.8 regression test that the composer does not change its hook count when
+// the display currency / budget state changes (a conditional hook would).
+let hookSeats = 0;
+
+function resetHookSeats() {
+  hookSeats = 0;
+}
 
 const React = {
   createElement(type, props, ...children) {
@@ -36,6 +44,7 @@ const React = {
     return { type, props: props || {}, children: flat };
   },
   useState(initial) {
+    hookSeats += 1;
     const index = hookIndex++;
     if (!(index in hookState)) hookState[index] = typeof initial === 'function' ? initial() : initial;
     return [
@@ -47,9 +56,11 @@ const React = {
     ];
   },
   useEffect(fn) {
+    hookSeats += 1;
     effectQueue.push(fn);
   },
   useRef() {
+    hookSeats += 1;
     const index = hookIndex++;
     if (!(index in hookRefs)) hookRefs[index] = { current: null };
     return hookRefs[index];
@@ -1130,6 +1141,109 @@ test('budget pill turns orange after a new pill value without hovering', () => {
     if (restoreBudget === null) localStorage.removeItem('dsh.turn-cost.budget.v1');
     else localStorage.setItem('dsh.turn-cost.budget.v1', restoreBudget);
   }
+});
+
+test('page totals skip failed sessions but keep the visible row count (1.6.8)', () => {
+  const { sumSessionTotals } = plugin.helpers;
+  const restore = plugin.settings.read();
+  try {
+    plugin.settings.write({ ...restore, currency: 'CNY' });
+    assert.equal(
+      sumSessionTotals([
+        { totalCostMicro: 100 },
+        { totalCostMicro: 50, error: 'boom' },
+        { costMicro: 7 },
+        null,
+        3,
+      ]),
+      107,
+    );
+    assert.equal(sumSessionTotals([]), 0);
+    assert.equal(sumSessionTotals(undefined), 0);
+  } finally {
+    plugin.settings.write(restore);
+  }
+});
+
+test('page totals and group subtotals share the error-skipping helper (1.6.8)', () => {
+  const source = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'client.js'), 'utf8');
+  assert.ok(source.includes('costMicro: sumSessionTotals(visibleSessions)'));
+  assert.ok(source.includes('moneyMicro(sumSessionTotals(group.sessions))'));
+  // Excel keeps its own filter + 「—」 row and must not route through the page
+  // helper (its behaviour is unchanged by this fix).
+  assert.ok(source.includes('.filter((session) => !session.error)'));
+  assert.ok(source.includes("error: session.error || null"));
+});
+
+test('composer reads the projection exactly once per render (1.6.8)', () => {
+  const source = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'client.js'), 'utf8');
+  const start = source.indexOf('function ComposerCostEntry(props) {');
+  const end = source.indexOf('function ComposerAnchor() {');
+  assert.ok(start > 0 && end > start, 'composer component boundaries must be found');
+  const body = source.slice(start, end);
+  assert.equal((body.match(/readProjection\(props\)/g) || []).length, 1);
+  assert.equal((body.match(/sessionCostMicro\(props/g) || []).length, 0);
+  assert.equal((body.match(/sessionCostMicroFrom\(/g) || []).length, 2);
+});
+
+test('composer hook count stays constant when currency and budget change (1.6.8)', () => {
+  const Composer = registered['turn-cost-composer'];
+  assert.equal(typeof Composer, 'function', 'composer entry must be registered');
+  const restore = plugin.settings.read();
+  const restoreBudget = localStorage.getItem('dsh.turn-cost.budget.v1');
+  const props = {
+    t,
+    sessionId: 's1',
+    useProjection: () => viewWith([entry(1)]),
+    useChat: () => undefined,
+  };
+  try {
+    plugin.settings.write({ ...restore, currency: 'CNY', showBudget: true });
+    localStorage.removeItem('dsh.turn-cost.budget.v1');
+    resetHooks();
+    hookSeats = 0;
+    Composer(props);
+    const noBudgetSeats = hookSeats;
+
+    // Same instance, cross-currency budget: the converted branch runs instead
+    // of the same-currency one; the hook count must not change.
+    localStorage.setItem(
+      'dsh.turn-cost.budget.v1',
+      JSON.stringify({ v: 2, budgets: { s1: { micro: 5_000_000, currency: 'USD' } } }),
+    );
+    hookIndex = 0;
+    effectQueue = [];
+    dirty = false;
+    hookSeats = 0;
+    Composer(props);
+    const convertedSeats = hookSeats;
+
+    plugin.settings.write({ ...plugin.settings.read(), currency: 'USD' });
+    hookIndex = 0;
+    effectQueue = [];
+    dirty = false;
+    hookSeats = 0;
+    Composer(props);
+    const usdSeats = hookSeats;
+
+    assert.ok(noBudgetSeats > 20, 'sanitty: composer must use a realistic number of hooks');
+    assert.equal(convertedSeats, noBudgetSeats);
+    assert.equal(usdSeats, noBudgetSeats);
+  } finally {
+    plugin.settings.write(restore);
+    if (restoreBudget === null) localStorage.removeItem('dsh.turn-cost.budget.v1');
+    else localStorage.setItem('dsh.turn-cost.budget.v1', restoreBudget);
+  }
+});
+
+test('group sorting and the Excel time column use activity time (1.6.8)', () => {
+  const source = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'client.js'), 'utf8');
+  assert.ok(source.includes('const timeOf = (session) => sessionActivityTime(session);'));
+  assert.ok(source.includes('time: formatSessionTime(sessionActivityTime(session)),'));
+  assert.equal((source.match(/formatSessionTime\(session\.createdAt\)/g) || []).length, 0);
+  const groupStart = source.indexOf('function groupSessions(');
+  const timeOfAt = source.indexOf('const timeOf = (session) => sessionActivityTime(session);');
+  assert.ok(groupStart > 0 && timeOfAt > groupStart, 'groupSessions must sort by activity time');
 });
 
 for (const result of results) {

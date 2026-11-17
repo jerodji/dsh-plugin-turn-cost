@@ -189,9 +189,9 @@ localStorage 记录按会话分组、轮次以 `id` 为键，便于按会话 ID 
 - **会话按钮/面板标题金额** = 父会话自身截至该轮的各轮 + 本会话内**在该轮结束前已结束**的子代理（含更深层后代）已计价轮次；同一子代理跨多轮的金额在会话弹窗里合并为一行「该子代理合计」。**弹窗内「会话合计」只列主代理自身**，与子代理分段分开显示。
 - **名字优先级**：本轮成员 → 会话成员（续跑也能取名）→ 子会话标题 → 会话 ID 前 8 位。子代理会话的标题是提示词前缀，通常不好看，所以成员名优先。
 - **套餐 / 未知**：套餐类子代理轮次显示「订阅额度」，不计入金额合计；未知价格或没有精确用量的子代理轮次不计入金额，与父会话自身的口径一致。
-- 父会话「本会话」按钮数字仍只统计本会话自身轮次 **加上** 上述子代理花费；子代理自己的会话在设置页账单里独立成行，不会重复计入父会话行。
+- 父会话「本会话」按钮数字仍只统计本会话自身轮次 **加上** 上述子代理花费。设置页只列顶层会话：真实子代理会话（`origin === 'subagent'`）的金额折入其父会话行（若中间隔着普通 fork/拷贝会话，则折入最近的可见祖先行），不会重复计数；父行自身读取失败时该子代理提升为独立行，避免金额丢失。
 
-宿主路由：`GET /api/turn-cost/state?scope=subagents&sessionId=<父会话 ID>` 用 `listSessions()` 的会话头（`parentSession`）找出全部后代子会话，再逐个复用与页面相同的折叠逻辑，返回每个子代理会话的 `id` / `title` / `origin` / `delegationDepth` / `createdAt` / `costMicro` / `costUsdMicro` / `planOnly` 与已结束轮次 `{turn, startedAt, endedAt, costMicro, plan}`；缺少或非法 `sessionId` 返回 400。结果缓存 30 秒，与 `balance` / `full` 的缓存互相独立。
+宿主路由：`GET /api/turn-cost/state?scope=subagents&sessionId=<父会话 ID>` 用 `listSessions()` 的会话头（`parentSession`）找出 `origin === 'subagent'` 的全部后代子会话（普通 fork/拷贝会话不在此列表中），再逐个复用与页面相同的折叠逻辑，返回每个子代理会话的 `id` / `title` / `origin` / `delegationDepth` / `createdAt` / `costMicro` / `costUsdMicro` / `planOnly` 与已结束轮次 `{turn, startedAt, endedAt, costMicro, plan}`；缺少或非法 `sessionId` 返回 400。结果缓存 30 秒，与 `balance` / `full` 的缓存互相独立。
 
 已知局限：归因按子代理轮次的结束时间近似，官方账单不会按父轮拆分；子代理在本轮结束后才结束的轮次会归入下一轮；子代理会话标题不可控且部分成员没有 name。金额仍为估算，以 DeepSeek 官方账单为准。
 
@@ -388,7 +388,7 @@ icon.svg            插件图标
 - 「合计」行右侧新增「导出为 Excel」按钮（`data-dsh-billing-export`，普通文字颜色，与其它小按钮一致）：
   - 只导出**当前时间范围内可见、且已勾选**的会话；某分组内 3 个会话只勾选 2 个时，该分组行金额 = 这 2 个会话金额之和，两个会话行金额仍是各自实际费用；末尾「总计」= 所有已导出会话之和。
   - 一个都没有勾选时，弹窗提示「当前没有选中」，不生成文件。
-  - 生成 `.xlsx`：内置零依赖写入器（zip store + SpreadsheetML，`buildBillingWorkbook`），列依次为 分组 / 会话 / Session ID / 时间 / 金额（元） / 轮数（时间取会话创建时间，按本地时区 `YYYY-MM-DD HH:mm` 输出）；文件名 `计费明细-YYYYMMDD-HHmm.xlsx`，通过 Blob + `<a download>` 下载，不经过宿主。
+  - 生成 `.xlsx`：内置零依赖写入器（zip store + SpreadsheetML，`buildBillingWorkbook`），列依次为 分组 / 会话 / Session ID / 时间 / 金额（元） / 轮数（时间取会话最近活动时间，含子代理活动，按本地时区 `YYYY-MM-DD HH:mm` 输出）；文件名 `计费明细-YYYYMMDD-HHmm.xlsx`，通过 Blob + `<a download>` 下载，不经过宿主。
 - 「导出为 Excel」左侧另有「全选 / 取消全选」按钮：在任意分组方式（按工作区目录 / 按工作区树 / 单列表）下，一键选中或清空**当前时间范围内**的全部会话。
 - 未勾选任何会话时点击导出，会弹出一个**居中的提示框**（0.6.2 前它会显示在页面左上角），内容为「当前没有选中」，点击遮罩或「关闭」按钮关闭。
 

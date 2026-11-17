@@ -285,32 +285,57 @@ async function buildFullState(ctx) {
     }
     return { ancestors, terminates: false };
   };
+
+  // Two-phase visibility. Phase one picks the rows that can be shown: every
+  // plain Session/fork, plus a real subagent whose parent chain is broken,
+  // missing, cyclic or too deep (dirty data is never hidden).
+  const visible = new Set();
   for (const session of sessions) {
-    if (session.subagent !== true) continue;
-    const { ancestors, terminates } = ancestryOf(session);
-    if (!terminates) continue;
-    for (const ancestor of ancestors) {
-      ancestor.subagentCostMicro += session.costMicro;
-      ancestor.subagentCostUsdMicro += session.costUsdMicro;
-      ancestor.subagentSessions += 1;
-      ancestor.lastActivityAt = Math.max(ancestor.lastActivityAt, session.lastActivityAt);
+    if (session.subagent !== true) {
+      visible.add(session.sessionId);
+      continue;
     }
+    if (session.parentSession === '' || !byId.has(session.parentSession)) {
+      visible.add(session.sessionId);
+      continue;
+    }
+    if (ancestryOf(session).terminates === false) visible.add(session.sessionId);
+  }
+
+  // Phase two folds each hidden subagent into its nearest *visible* ancestor,
+  // not into every ancestor: a fork in the middle of the chain is visible, so
+  // money is counted once (its own row), never again on the fork's ancestors.
+  // Parents are processed before children (shorter ancestor chain first) so a
+  // promoted row can collect its own descendants in the same pass.
+  const hidden = sessions
+    .filter((session) => !visible.has(session.sessionId))
+    .map((session) => ({ session, ancestors: ancestryOf(session).ancestors }))
+    .sort((a, b) => a.ancestors.length - b.ancestors.length);
+  for (const entry of hidden) {
+    const session = entry.session;
+    const ancestor = entry.ancestors.find((candidate) => visible.has(candidate.sessionId));
+    if (ancestor === undefined) {
+      visible.add(session.sessionId);
+      continue;
+    }
+    if (ancestor.error !== null) {
+      // That row renders 「—」 (its own log failed to load); absorbing child
+      // money would hide it. Promote the child instead, so it stays visible.
+      visible.add(session.sessionId);
+      continue;
+    }
+    ancestor.subagentCostMicro += session.costMicro;
+    ancestor.subagentCostUsdMicro += session.costUsdMicro;
+    ancestor.subagentSessions += 1;
+    ancestor.lastActivityAt = Math.max(ancestor.lastActivityAt, session.lastActivityAt);
   }
   for (const session of sessions) {
     session.totalCostMicro = session.costMicro + session.subagentCostMicro;
     session.totalCostUsdMicro = session.costUsdMicro + session.subagentCostUsdMicro;
   }
-  // Only Sessions that own no recorded ancestor are listed; descendants are
-  // represented by their top ancestor's total. A cycle member has no recorded
-  // ancestor by definition and stays visible so its cost is not lost.
-  const topLevel = sessions.filter((session) => {
-    // A plain fork may keep its source in `parentSession`; only a real
-    // subagent Session (origin === 'subagent') is folded into its parent.
-    if (session.subagent !== true) return true;
-    if (session.parentSession === '') return true;
-    if (!byId.has(session.parentSession)) return true;
-    return ancestryOf(session).terminates === false;
-  });
+  // Only the visible rows are listed; every hidden descendant's own cost is
+  // represented exactly once in its nearest visible ancestor's total.
+  const topLevel = sessions.filter((session) => visible.has(session.sessionId));
 
   const workspaces = [];
   const seen = new Set();
@@ -424,6 +449,9 @@ async function buildSubagentsState(ctx, sessionId) {
     headerById.set(id, header);
     const parentId = typeof header.parentSession === 'string' ? header.parentSession : '';
     if (parentId === '') continue;
+    // A plain fork may also keep its source in `parentSession`; only real
+    // subagent Sessions belong in the parent's subagent tree.
+    if (header.origin !== 'subagent') continue;
     const known = childrenByParent.get(parentId);
     if (known === undefined) childrenByParent.set(parentId, [id]);
     else known.push(id);

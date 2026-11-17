@@ -3107,6 +3107,21 @@ window.__ModuleLoader__.load({
       return Number(total !== undefined && total !== null ? total : record.costMicro) || 0;
     }
 
+    /**
+     * Page-level totals: sum the displayed Session totals, skipping rows whose
+     * own log failed (they render 「—」 and must not inflate the page totals,
+     * matching the Excel export).
+     */
+    function sumSessionTotals(sessions) {
+      let costMicro = 0;
+      for (const session of Array.isArray(sessions) ? sessions : []) {
+        if (session === null || typeof session !== 'object') continue;
+        if (session.error) continue;
+        costMicro += sessionTotalMicro(session);
+      }
+      return costMicro;
+    }
+
     function displayPath(path) {
       const parts = String(path || '')
         .split(/[\\/]/)
@@ -3829,7 +3844,7 @@ window.__ModuleLoader__.load({
       const by = sort !== undefined && sort.by === 'name' ? 'name' : 'time';
       const direction = sort !== undefined && sort.dir === 'asc' ? 1 : -1;
       const labelOf = (session) => String(session.title || session.sessionId || '');
-      const timeOf = (session) => Number(session.createdAt) || 0;
+      const timeOf = (session) => sessionActivityTime(session);
       const compareSessions = (a, b) => {
         const delta = by === 'name' ? labelOf(a).localeCompare(labelOf(b), 'zh-Hans-CN') : timeOf(a) - timeOf(b);
         if (delta !== 0) return delta * direction;
@@ -4009,14 +4024,12 @@ window.__ModuleLoader__.load({
       const alerts = data === undefined ? [] : balanceAlerts(data, thresholds);
       const timeRange = TIME_RANGES.indexOf(thresholds.range) >= 0 ? thresholds.range : 'all';
       const visibleSessions = filterSessionsByRange(sessions, timeRange, Date.now());
-      const visibleTotals = visibleSessions.reduce(
-        (acc, session) => {
-          acc.costMicro += sessionTotalMicro(session);
-          acc.sessions += 1;
-          return acc;
-        },
-        { costMicro: 0, sessions: 0 },
-      );
+      const visibleTotals = {
+        costMicro: sumSessionTotals(visibleSessions),
+        // The count keeps the visible-row semantic; failed rows are listed
+        // with 「—」 and only excluded from the money total.
+        sessions: visibleSessions.length,
+      };
       const groups = groupSessions(visibleSessions, mode, { by: sortBy, dir: sortDir });
 
       const isSelected = (sessionId) => selected[sessionId] === true;
@@ -4071,7 +4084,7 @@ window.__ModuleLoader__.load({
               groupTitle,
               title: session.title || session.sessionId,
               sessionId: session.sessionId,
-              time: formatSessionTime(session.createdAt),
+              time: formatSessionTime(sessionActivityTime(session)),
               amountMicro: sessionTotalMicro(session),
               turns: session.turns,
               error: session.error || null,
@@ -4550,7 +4563,7 @@ window.__ModuleLoader__.load({
                           h(
                             'span',
                             { style: { ...MUTED, color: 'var(--dsw-alias-label-secondary)' } },
-                            moneyMicro(group.sessions.reduce((sum, session) => sum + sessionTotalMicro(session), 0)),
+                            moneyMicro(sumSessionTotals(group.sessions)),
                           ),
                         ),
                     ...(collapsedKeys[group.key] === true
@@ -4738,15 +4751,23 @@ window.__ModuleLoader__.load({
       return undefined;
     }
 
-    /** This Session's total cost in `currency` (micro units): projection then store. */
-    function sessionCostMicro(props, sessionId, currency) {
+    /**
+     * This Session's total cost in `currency` (micro units) from an
+     * already-read projection. Pure: never touches hooks, so a component can
+     * read the projection once per render and derive several currencies.
+     */
+    function sessionCostMicroFrom(projection, sessionId, currency) {
       const target = currency || activeCurrency();
-      const projection = readProjection(props);
       const fromProjection = projection === undefined ? undefined : viewTotalMicro(projection, target);
       if (fromProjection !== undefined) return fromProjection;
       if (!sessionId) return undefined;
       const record = turnCostStore().getSession(sessionId);
       return viewTotalMicro(record, target);
+    }
+
+    /** This Session's total cost in `currency` (micro units): projection then store. */
+    function sessionCostMicro(props, sessionId, currency) {
+      return sessionCostMicroFrom(readProjection(props), sessionId, currency);
     }
 
     /**
@@ -4919,6 +4940,9 @@ window.__ModuleLoader__.load({
         };
       }, []);
 
+      // Hooks must run in the same order on every render: read the projection
+      // exactly once here (unconditional) and derive every amount from it.
+      const projection = readProjection(props);
       const displayCurrency = activeCurrency();
       const budget = readBudget(sessionId);
       // The 币种 setting drives every amount on screen. A budget set while the
@@ -4935,7 +4959,7 @@ window.__ModuleLoader__.load({
         budgetMicro === undefined
           ? undefined
           : `${budgetConverted ? '≈' : ''}${money(budgetMicro / 1e6, displayCurrency)}`;
-      const ownCostMicro = sessionCostMicro(props, sessionId, displayCurrency);
+      const ownCostMicro = sessionCostMicroFrom(projection, sessionId, displayCurrency);
       // 「本会话已用」 mirrors the footer 「本会话」 pill, which the badge
       // publishes as own Session total + subagent spend. Fall back to the own
       // total when no badge has rendered yet (e.g. no closed turn).
@@ -4951,7 +4975,7 @@ window.__ModuleLoader__.load({
           : budget.currency === displayCurrency
             ? costMicro
             : (() => {
-                const own = sessionCostMicro(props, sessionId, budget.currency);
+                const own = sessionCostMicroFrom(projection, sessionId, budget.currency);
                 if (own === undefined) return undefined;
                 const subagent =
                   pillMicro !== undefined && ownCostMicro !== undefined
@@ -5360,6 +5384,8 @@ window.__ModuleLoader__.load({
         sessionTotalMicro,
         sessionActivityTime,
         filterSessionsByRange,
+        sessionCostMicroFrom,
+        sumSessionTotals,
       },
       subagents: {
         attributeTurn: attributeSubagents,

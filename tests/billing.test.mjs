@@ -488,6 +488,124 @@ await test('a parent created long ago inherits its subagents last activity', asy
   assert.equal(row.subagentCostMicro, 2_340_000);
 });
 
+/* A real subagent under a plain fork: the fork is visible, so only it carries
+   the subagent cost; the fork's own ancestor must not count it again. */
+const FORK_ROOT = {
+  header: { id: 'fork-root', cwd: '/work/fork', createdAt: 1000 },
+  events: eventsFor(1),
+};
+const FORK_MID = {
+  header: { id: 'fork-mid', parentSession: 'fork-root', createdAt: 2000 },
+  events: eventsFor(1),
+};
+const FORK_SUB = {
+  header: {
+    id: 'fork-sub',
+    parentSession: 'fork-mid',
+    origin: 'subagent',
+    delegationDepth: 1,
+    createdAt: 3000,
+  },
+  events: eventsFor(1),
+};
+
+await test('a fork chain folds the subagent into its nearest visible ancestor only', async () => {
+  resetBillingCache();
+  const fake = fakeCtx({
+    sessions: [FORK_ROOT, FORK_MID, FORK_SUB],
+    workspaces: [{ id: 'ws-fork', title: 'Fork', path: '/work/fork', sessionIds: ['fork-root'] }],
+  });
+  const data = await readBillingState(fake.ctx, 'full');
+
+  // The fork stays visible; the real subagent is folded into the fork, not
+  // into the fork's own ancestor.
+  assert.deepEqual(data.sessions.map((session) => session.sessionId), ['fork-root', 'fork-mid']);
+  const root = data.sessions[0];
+  const fork = data.sessions[1];
+  assert.equal(root.subagentCostMicro, 0);
+  assert.equal(root.totalCostMicro, 2_340_000);
+  assert.equal(fork.subagentCostMicro, 2_340_000);
+  assert.equal(fork.subagentSessions, 1);
+  assert.equal(fork.totalCostMicro, 4_680_000);
+  // Invariant: the top-level totals equal the sum of every own cost.
+  assert.equal(data.totals.costMicro, 7_020_000);
+  assert.equal(data.totals.sessions, 2);
+  const forkWorkspace = data.workspaces.find((workspace) => workspace.id === 'ws-fork');
+  assert.deepEqual(
+    [forkWorkspace.id, forkWorkspace.costMicro, forkWorkspace.sessions],
+    ['ws-fork', 2_340_000, 1],
+  );
+  // Sessions without a workspace fall into a cwd group; it carries the fork's
+  // own + folded subagent amount, so no money is lost from the grouping view.
+  const cwdGroup = data.workspaces.find((workspace) => workspace.id === 'cwd:');
+  assert.deepEqual([cwdGroup.costMicro, cwdGroup.sessions], [4_680_000, 1]);
+
+  // The subagents scope only walks real subagent sessions: the plain fork is
+  // not part of the root's subagent list, but it is the fork's subagent.
+  resetBillingCache();
+  const rootScope = await readBillingState(fake.ctx, 'subagents', 'fork-root');
+  assert.deepEqual(rootScope.sessions, []);
+  resetBillingCache();
+  const forkScope = await readBillingState(fake.ctx, 'subagents', 'fork-mid');
+  assert.deepEqual(forkScope.sessions.map((session) => session.id), ['fork-sub']);
+});
+
+await test('a failed parent row promotes its readable subagent instead of hiding it', async () => {
+  resetBillingCache();
+  const brokenParent = {
+    header: { id: 'err-parent', cwd: '/work/err', createdAt: 1000 },
+    events: [],
+  };
+  const readableChild = {
+    header: {
+      id: 'err-child',
+      parentSession: 'err-parent',
+      origin: 'subagent',
+      delegationDepth: 1,
+      createdAt: 2000,
+    },
+    events: eventsFor(1),
+  };
+  const fake = fakeCtx({ sessions: [brokenParent, readableChild], failSessions: ['err-parent'] });
+  const data = await readBillingState(fake.ctx, 'full');
+
+  assert.deepEqual(data.sessions.map((session) => session.sessionId), ['err-parent', 'err-child']);
+  const parent = data.sessions[0];
+  const child = data.sessions[1];
+  assert.ok(parent.error, 'the failed row keeps its error marker');
+  assert.equal(parent.totalCostMicro, 0);
+  assert.equal(child.subagentCostMicro, 0);
+  assert.equal(child.totalCostMicro, 2_340_000);
+  // The child was promoted, not absorbed into the 「—」 row.
+  assert.equal(data.totals.costMicro, 2_340_000);
+  assert.equal(data.totals.sessions, 2);
+});
+
+await test('a promoted subagent keeps its own children when its parent failed', async () => {
+  resetBillingCache();
+  const brokenParent = { header: { id: 'e2-parent', createdAt: 1000 }, events: [] };
+  const child = {
+    header: { id: 'e2-child', parentSession: 'e2-parent', origin: 'subagent', delegationDepth: 1, createdAt: 2000 },
+    events: eventsFor(1),
+  };
+  const grandchild = {
+    header: { id: 'e2-grand', parentSession: 'e2-child', origin: 'subagent', delegationDepth: 2, createdAt: 3000 },
+    events: eventsFor(1),
+  };
+  const fake = fakeCtx({
+    sessions: [brokenParent, child, grandchild],
+    failSessions: ['e2-parent'],
+  });
+  const data = await readBillingState(fake.ctx, 'full');
+  assert.deepEqual(data.sessions.map((session) => session.sessionId), ['e2-parent', 'e2-child']);
+  const promoted = data.sessions[1];
+  assert.equal(promoted.subagentCostMicro, 2_340_000);
+  assert.equal(promoted.subagentSessions, 1);
+  assert.equal(promoted.totalCostMicro, 4_680_000);
+  assert.equal(data.totals.costMicro, 4_680_000);
+  assert.equal(data.totals.sessions, 2);
+});
+
 await test('subagents scope lists descendants with compact ended turns', async () => {
   resetBillingCache();
   setPlanProviders(['chatgpt']);
