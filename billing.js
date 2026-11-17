@@ -228,6 +228,7 @@ async function buildFullState(ctx) {
         missingTurns: summary.missingTurns,
         tokens: summary.tokens,
         updatedAt: summary.updatedAt,
+        lastActivityAt: Math.max(toNumber(header && header.createdAt), toNumber(summary.updatedAt)),
         error: null,
         workspace: workspaceOf(workspaceIndex, summary) ?? null,
       });
@@ -254,6 +255,7 @@ async function buildFullState(ctx) {
         missingTurns: [],
         tokens: 0,
         updatedAt: 0,
+        lastActivityAt: toNumber(header && header.createdAt),
         error: error instanceof Error ? error.message : String(error),
         workspace: null,
       });
@@ -291,6 +293,7 @@ async function buildFullState(ctx) {
       ancestor.subagentCostMicro += session.costMicro;
       ancestor.subagentCostUsdMicro += session.costUsdMicro;
       ancestor.subagentSessions += 1;
+      ancestor.lastActivityAt = Math.max(ancestor.lastActivityAt, session.lastActivityAt);
     }
   }
   for (const session of sessions) {

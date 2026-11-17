@@ -465,6 +465,25 @@ await test('a plain fork with parentSession stays at the top level', async () =>
   assert.equal(data.totals.costMicro, 5_850_000);
 });
 
+await test('a parent created long ago inherits its subagents last activity', async () => {
+  resetBillingCache();
+  const now = Date.now();
+  const parent = { header: { id: 'la-parent', createdAt: 1000 }, events: [] };
+  const child = {
+    header: { id: 'la-child', parentSession: 'la-parent', origin: 'subagent', createdAt: now - 120_000 },
+    events: eventsFor(1, { time: now - 60_000 }),
+  };
+  const fake = fakeCtx({ sessions: [parent, child] });
+  const data = await readBillingState(fake.ctx, 'full');
+  assert.equal(data.sessions.length, 1);
+  const row = data.sessions[0];
+  assert.equal(row.sessionId, 'la-parent');
+  assert.equal(row.lastActivityAt, now - 60_000 + 2000);
+  assert.ok(row.lastActivityAt > row.createdAt);
+  assert.equal(row.totalCostMicro, 2_340_000);
+  assert.equal(row.subagentCostMicro, 2_340_000);
+});
+
 await test('subagents scope lists descendants with compact ended turns', async () => {
   resetBillingCache();
   setPlanProviders(['chatgpt']);

@@ -3440,10 +3440,18 @@ window.__ModuleLoader__.load({
       return days > 0 ? now - days * 24 * 60 * 60 * 1000 : 0;
     }
 
+    /** Latest known activity of a session (host snapshot; legacy fallback). */
+    function sessionActivityTime(session) {
+      if (session === null || typeof session !== 'object') return 0;
+      const lastActivityAt = Number(session.lastActivityAt);
+      if (Number.isFinite(lastActivityAt) && lastActivityAt > 0) return lastActivityAt;
+      return Math.max(Number(session.createdAt) || 0, Number(session.updatedAt) || 0);
+    }
+
     function filterSessionsByRange(sessions, range, now) {
       const start = rangeStart(range, now);
       if (!(start > 0)) return sessions;
-      return sessions.filter((session) => (Number(session.createdAt) || 0) >= start);
+      return sessions.filter((session) => sessionActivityTime(session) >= start);
     }
 
 
@@ -5300,6 +5308,8 @@ window.__ModuleLoader__.load({
         publishSessionPill,
         sessionPillMicro,
         sessionTotalMicro,
+        sessionActivityTime,
+        filterSessionsByRange,
       },
       subagents: {
         attributeTurn: attributeSubagents,

@@ -934,6 +934,39 @@ test('select-all only touches visible ids (A8)', () => {
   assert.deepEqual(mergeVisibleSelection({}, [], true), {});
 });
 
+test('range filtering uses the latest session activity', () => {
+  const { sessionActivityTime, filterSessionsByRange } = plugin.helpers;
+  const now = new Date(2026, 10, 17, 12, 0, 0).getTime();
+  const recent = now - 60 * 60 * 1000;
+  const old = new Date(2026, 10, 12, 12, 0, 0).getTime();
+  const sessions = [
+    { id: 'old-created-new-activity', createdAt: old, updatedAt: old, lastActivityAt: recent },
+    { id: 'legacy-updated-today', createdAt: old, updatedAt: recent },
+    { id: 'all-old', createdAt: old, updatedAt: old },
+    { id: 'brand-new', createdAt: recent, updatedAt: recent },
+  ];
+  assert.equal(sessionActivityTime(sessions[0]), recent);
+  assert.equal(sessionActivityTime(sessions[1]), recent);
+  assert.equal(sessionActivityTime(sessions[2]), old);
+  assert.equal(sessionActivityTime(undefined), 0);
+  const todayIds = filterSessionsByRange(sessions, 'today', now).map((session) => session.id);
+  assert.deepEqual(todayIds, ['old-created-new-activity', 'legacy-updated-today', 'brand-new']);
+  const weekIds = filterSessionsByRange(sessions, '7d', now).map((session) => session.id);
+  assert.deepEqual(weekIds, ['old-created-new-activity', 'legacy-updated-today', 'all-old', 'brand-new']);
+  assert.equal(filterSessionsByRange(sessions, 'all', now).length, 4);
+  assert.equal(filterSessionsByRange(sessions, 'today', now).some((session) => session.id === 'all-old'), false);
+});
+
+test('session activity time falls back for legacy host snapshots', () => {
+  const { sessionActivityTime } = plugin.helpers;
+  assert.equal(sessionActivityTime({ lastActivityAt: 500, createdAt: 100, updatedAt: 300 }), 500);
+  assert.equal(sessionActivityTime({ lastActivityAt: 0, createdAt: 100, updatedAt: 300 }), 300);
+  assert.equal(sessionActivityTime({ createdAt: 100, updatedAt: 300 }), 300);
+  assert.equal(sessionActivityTime({ createdAt: 100 }), 100);
+  assert.equal(sessionActivityTime({}), 0);
+  assert.equal(sessionActivityTime(null), 0);
+});
+
 test('settings rows prefer the host session total (1.6.5)', () => {
   const { sessionTotalMicro } = plugin.helpers;
   const restore = plugin.settings.read();
